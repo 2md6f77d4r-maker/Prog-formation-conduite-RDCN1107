@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — JS Excel</title>
-<!-- Version V9.8 : repos inter-journées minimum passé à 13h -->
+<!-- Version V10.1 : attribution optimisée par rythme circadien + équité matin/journée/soir -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -119,7 +119,7 @@ body.dark .cov-ok{color:#86efac} body.dark .cov-warn{color:#fde68a} body.dark .c
     <div class="info-card"><div class="label">Fichier Excel des JS</div><div class="val" id="fileName">JS ADC Phase 4 2026.xlsx</div><div class="sub" id="fileStatus">Fichier intégré au HTML</div></div>
     <div class="info-card"><div class="label">Période planifiée</div><div class="val" id="periodInfo">-</div><div class="sub" id="periodSub">Toute la durée détectée dans l'Excel</div></div>
     <div class="info-card"><div class="label">Agents</div><div class="val">5 agents fixes</div><div class="sub">Dylan B, Gregorie L, Gaëtan C, Fabien B, Yannick H</div></div>
-    <div class="info-card"><div class="label">Règles actives</div><div class="val">140h / 28j · repos 13h</div><div class="sub">Samedi et dimanche au repos pour tout le monde</div></div>
+    <div class="info-card"><div class="label">Règles actives</div><div class="val">140h / 28j · repos 13h</div><div class="sub">Rythme circadien : séries matin/journée/soir + équité par type</div></div>
     <div class="info-card"><div class="label">État</div><div class="val" id="stateInfo">Chargement...</div><div class="sub" id="stateSub">Initialisation</div></div>
   </section>
 
@@ -453,6 +453,63 @@ function getPeriodDates(){
   return dates;
 }
 function isWorking(s){return s && s.type!=="REST" && s.type!=="CP"}
+
+function serviceFamily(svc){
+  if(!svc || svc.type==="REST" || svc.type==="CP") return "REPOS";
+  if(svc.type==="DISPO") return "JOURNEE";
+  const st=svc.startMin, en=svc.endMin;
+  if(st==null || en==null) return "AUTRE";
+  if(st < 9*60+30 || en <= 14*60+30) return "MATIN";
+  if(st >= 13*60+30 || en >= 20*60) return "SOIR";
+  return "JOURNEE";
+}
+function familyLabel(f){return ({MATIN:"Matin",JOURNEE:"Journée",SOIR:"Soir",AUTRE:"Autre",REPOS:"Repos"}[f]||f)}
+function initRhythmStats(agent){
+  if(!agent.familyCounts) agent.familyCounts={MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
+  return agent.familyCounts;
+}
+function rebuildRhythmStats(){
+  if(!planning || !planning.agents) return;
+  planning.agents.forEach(a=>{
+    a.familyCounts={MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
+    a.days.forEach(s=>{
+      if(s && s.type==="WORK"){
+        const f=serviceFamily(s);
+        a.familyCounts[f]=(a.familyCounts[f]||0)+1;
+      }
+    });
+  });
+}
+function rhythmTransitionPenalty(prevFam,nextFam){
+  if(!prevFam || !nextFam || prevFam==="REPOS" || nextFam==="REPOS") return 0;
+  if(prevFam===nextFam) return -220; // on privilégie les séries cohérentes
+  if(prevFam==="MATIN" && nextFam==="JOURNEE") return -70;
+  if(prevFam==="JOURNEE" && nextFam==="SOIR") return -60;
+  if(prevFam==="SOIR" && nextFam==="MATIN") return 520; // bascule la plus défavorable
+  if(prevFam==="SOIR" && nextFam==="JOURNEE") return 180;
+  if(prevFam==="MATIN" && nextFam==="SOIR") return 210;
+  return 60;
+}
+function countSameFamilyRun(agent, di, fam){
+  let n=0;
+  for(let i=di-1;i>=0;i--){
+    const s=agent.days[i];
+    if(!isWorking(s) || serviceFamily(s)!==fam) break;
+    n++;
+  }
+  return n;
+}
+function updateAgentAfterAssign(agent, slot){
+  initRhythmStats(agent);
+  agent.totalWorkMin+=slot.workMin||0;
+  if(slot.type==="DISPO") agent.dispoDays++;
+  else if(slot.type==="WORK"){
+    agent.workDays++;
+    const f=serviceFamily(slot);
+    agent.familyCounts[f]=(agent.familyCounts[f]||0)+1;
+  }
+}
+
 function canAssign(agent, di, svc, dates){
   if(agent.days[di]) return {ok:false,reason:"Agent déjà affecté ce jour"};
   if(isWeekend(dates[di])) return {ok:false,reason:"Samedi/dimanche imposé en repos"};
@@ -473,16 +530,134 @@ function canAssign(agent, di, svc, dates){
   return reasons.length?{ok:false,reason:reasons.join(" · ")}:{ok:true,reason:""};
 }
 function scoreAgent(agent, di, svc, dates, force=false){
-  const totalH=agent.totalWorkMin, avgH=(planning?.agents||[]).reduce((s,a)=>s+a.totalWorkMin,0)/AGENTS.length||0;
+  initRhythmStats(agent);
+  const allAgents=planning?.agents||[];
+  const totalH=agent.totalWorkMin;
+  const avgH=allAgents.reduce((sum,a)=>sum+a.totalWorkMin,0)/(allAgents.length||1)||0;
+  const fam=serviceFamily(svc);
+  const famTotal=allAgents.reduce((sum,a)=>sum+(initRhythmStats(a)[fam]||0),0);
+  const famAvg=famTotal/(allAgents.length||1);
   let s=(totalH-avgH)*2 + agent.workDays*80 - agent.dispoDays*25 + Math.sin((di+1)*(agent.name.length+seed))*45;
+
+  // Équité spécifique : celui qui a déjà beaucoup de matins/soirs prend une pénalité sur ce même type.
+  s += ((agent.familyCounts[fam]||0)-famAvg)*240;
+  if(fam==="MATIN" || fam==="SOIR") s += ((agent.familyCounts[fam]||0)-famAvg)*120;
+
+  // Rythme circadien : on récompense les séries cohérentes et on pénalise les bascules brutales.
+  const prev=di>0 ? agent.days[di-1] : null;
+  const next=di<dates.length-1 ? agent.days[di+1] : null;
+  if(isWorking(prev)) s += rhythmTransitionPenalty(serviceFamily(prev),fam);
+  if(isWorking(next)) s += rhythmTransitionPenalty(fam,serviceFamily(next));
+  const run=countSameFamilyRun(agent,di,fam);
+  if(run>=1 && run<=3) s-=90*run;
+  if(run>=4) s+=180*(run-3); // évite qu'un agent absorbe toute une famille de journées
+
+  // Repos qualitatif : même si 13h est légal/autorisé, on évite les enchaînements trop serrés quand une autre solution existe.
+  const minRest=Number(document.getElementById("minRest").value)||13;
+  if(isWorking(prev)){
+    const r=restBetween(prev,svc);
+    if(r>=minRest*60 && r<15*60) s+=260;
+    else if(r<17*60) s+=90;
+    else if(r>=20*60) s-=35;
+  }
+  if(isWorking(next)){
+    const r=restBetween(svc,next);
+    if(r>=minRest*60 && r<15*60) s+=220;
+    else if(r<17*60) s+=70;
+  }
+
   if(svc.workMin>7*60 && totalH>avgH) s+=180;
   const ck=canAssign(agent,di,svc,dates); if(!ck.ok) s+=force?500:999999;
   return s;
 }
+
+function recomputeAgentStats(){
+  if(!planning || !planning.agents) return;
+  planning.dispoCount=0;
+  planning.agents.forEach(a=>{
+    a.totalWorkMin=0; a.workDays=0; a.dispoDays=0; a.cpDays=0; a.forced=[];
+    a.familyCounts={MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
+    a.days.forEach(slot=>{
+      if(!slot) return;
+      if(slot.type==="CP") a.cpDays++;
+      if(isWorking(slot)){
+        a.totalWorkMin+=slot.workMin||0;
+        if(slot.type==="DISPO") { a.dispoDays++; planning.dispoCount++; }
+        else if(slot.type==="WORK"){
+          a.workDays++;
+          const f=serviceFamily(slot);
+          a.familyCounts[f]=(a.familyCounts[f]||0)+1;
+        }
+      }
+    });
+  });
+}
+function canAssignInto(agent, di, svc, dates){
+  const existing=agent.days[di];
+  if(existing && existing.type!=="DISPO") return {ok:false,reason:"Agent déjà affecté ce jour"};
+  const saved=agent.days[di];
+  agent.days[di]=null;
+  const ck=canAssign(agent,di,svc,dates);
+  agent.days[di]=saved;
+  return ck;
+}
+function assignSlotToAgent(agent, di, svc, forced=false, reason=""){
+  const slot={...svc,type:"WORK",forced,reason};
+  agent.days[di]=slot;
+  return slot;
+}
+function makeDispoSlot(){
+  return {type:"DISPO",code:"DISPO",startMin:10*60,endMin:15*60,workMin:5*60,amplitudeMin:5*60,forced:false,reason:"Aucune JS attribuée : journée disponible"};
+}
+function findBestStrictAgentFor(di, svc, forbiddenAgent=null){
+  recomputeAgentStats();
+  const candidates=planning.agents
+    .filter(a=>a!==forbiddenAgent)
+    .map(a=>({a,ck:canAssignInto(a,di,svc,planning.dates)}))
+    .filter(x=>x.ck.ok)
+    .sort((x,y)=>scoreAgent(x.a,di,svc,planning.dates,false)-scoreAgent(y.a,di,svc,planning.dates,false));
+  return candidates[0]?.a || null;
+}
+function tryRepairPlanning(){
+  if(!planning || !planning.agents) return;
+  const maxPasses=8;
+  for(let pass=0; pass<maxPasses; pass++){
+    computeWarnings();
+    const alerts=planning.forced.slice().sort((a,b)=>{
+      const da=planning.dates.findIndex(d=>dateKey(d)===dateKey(a.date));
+      const db=planning.dates.findIndex(d=>dateKey(d)===dateKey(b.date));
+      return da-db;
+    });
+    if(!alerts.length) break;
+    let changed=false;
+    for(const alert of alerts){
+      const di=planning.dates.findIndex(d=>dateKey(d)===dateKey(alert.date));
+      if(di<0) continue;
+      const currentAgent=planning.agents.find(a=>a.name===alert.agent);
+      if(!currentAgent) continue;
+      const svc=currentAgent.days[di];
+      if(!svc || svc.type!=="WORK") continue;
+      currentAgent.days[di]=makeDispoSlot();
+      recomputeAgentStats();
+      let best=findBestStrictAgentFor(di,svc,currentAgent);
+      if(best){
+        assignSlotToAgent(best,di,svc,false,"");
+        changed=true;
+      }else{
+        currentAgent.days[di]=svc;
+      }
+      recomputeAgentStats();
+      if(changed) break;
+    }
+    if(!changed) break;
+  }
+  computeWarnings();
+}
+
 function generatePlanning(){
   if(!extractedJS.length){alert("Charge d'abord le fichier Excel des JS.");return}
   const dates=getPeriodDates();
-  const agents=AGENTS.map(n=>({name:n,days:Array(dates.length).fill(null),totalWorkMin:0,workDays:0,dispoDays:0,cpDays:0,forced:[]}));
+  const agents=AGENTS.map(n=>({name:n,days:Array(dates.length).fill(null),totalWorkMin:0,workDays:0,dispoDays:0,cpDays:0,forced:[],familyCounts:{MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0}}));
   planning={dates,agents,uncovered:[],forced:[],dispoCount:0};
   const byDate=new Map();
   extractedJS.forEach(js=>js.dates.forEach(d=>{const k=dateKey(d); if(!byDate.has(k))byDate.set(k,[]); byDate.get(k).push(js)}));
@@ -505,19 +680,19 @@ function generatePlanning(){
       const best=candidates[0]; if(!best){planning.uncovered.push({date,js,reason:"Aucun agent disponible"});return}
       if(forced) reason=best.ck.reason || "Attribution forcée";
       const slot={...js,type:"WORK",forced,reason};
-      best.a.days[di]=slot; best.a.totalWorkMin+=js.workMin; best.a.workDays++;
+      best.a.days[di]=slot; updateAgentAfterAssign(best.a,slot);
       if(forced){best.a.forced.push({di,slot,reason}); planning.forced.push({agent:best.a.name,date,js,reason});}
     });
     agents.forEach(a=>{
       if(!a.days[di]){
         const dispo={type:"DISPO",code:"DISPO",startMin:10*60,endMin:15*60,workMin:5*60,amplitudeMin:5*60,forced:false,reason:"Aucune JS attribuée : journée disponible"};
-        a.days[di]=dispo; a.totalWorkMin+=dispo.workMin; a.dispoDays++; planning.dispoCount++;
+        a.days[di]=dispo; updateAgentAfterAssign(a,dispo); planning.dispoCount++;
       }
     });
   });
-  computeWarnings();
+  tryRepairPlanning();
   renderPlanning();
-  setState("Prêt","Dernière génération effectuée.");
+  setState("Prêt","Planning généré avec optimisation du rythme circadien, équité et réparation automatique des journées rouges quand c’est possible.");
 }
 function getRequiredForDate(di){
   if(!planning || !planning.dates || !planning.dates[di]) return [];
@@ -559,9 +734,9 @@ function computeWarnings(){
   planning.forced=[];
   planning.dispoCount=0;
   planning.agents.forEach(a=>{
-    a.totalWorkMin=0; a.workDays=0; a.dispoDays=0; a.cpDays=0; a.forced=[];
+    a.totalWorkMin=0; a.workDays=0; a.dispoDays=0; a.cpDays=0; a.forced=[]; a.familyCounts={MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
     a.days.forEach((s,di)=>{
-      if(isWorking(s)){a.totalWorkMin+=s.workMin||0;if(s.type==="DISPO"){a.dispoDays++;planning.dispoCount++;}else a.workDays++;}
+      if(isWorking(s)){a.totalWorkMin+=s.workMin||0;if(s.type==="DISPO"){a.dispoDays++;planning.dispoCount++;}else {a.workDays++; const f=serviceFamily(s); a.familyCounts[f]=(a.familyCounts[f]||0)+1;}}
       if(s && s.type==="CP") a.cpDays++;
       if(s && s.type==="WORK") s.reason=s.forced?s.reason:"";
     });
@@ -611,10 +786,10 @@ function renderPlanning(){
       let cls="rest", code="R", h="Repos", ex="", title="Repos";
       if(s.type==="DISPO"){cls="dispo";code="DISPO";h="5h00";title="DISPO : "+s.reason}
       if(s.type==="CP"){cls="cp";code="CP";h="-";title="Congé payé"+(s.reason?" · "+s.reason:"")}
-      if(s.type==="WORK"){cls=s.forced?"bad":"work";code=s.code;h=durH(s.workMin);ex=s.trains?.length?`${s.trains.length} train(s)`:"";title=`${s.code} · PS ${hhmm(s.startMin)} · FS ${hhmm(s.endMin)} · ${h}${s.forced?" · "+s.reason:""}`}
+      if(s.type==="WORK"){cls=s.forced?"bad":"work";code=s.code;h=durH(s.workMin);ex=s.trains?.length?`${s.trains.length} train(s)`:"";title=`${s.code} · ${familyLabel(serviceFamily(s))} · PS ${hhmm(s.startMin)} · FS ${hhmm(s.endMin)} · ${h}${s.forced?" · "+s.reason:""}`}
       return `<td class="slot"><div class="tile ${cls}" title="${escapeHtml(title)}" onclick="openDetail(${ai},${di})"><div class="code">${code}</div><div class="hours">${h}</div>${ex?`<div class="extra">${ex}</div>`:""}</div></td>`
     }).join("");
-    return `<tr><td class="agent"><div class="agent-name"><span class="avatar">${initials}</span>${a.name}</div><div class="agent-meta">⏱ ${durH(a.totalWorkMin)} période<br>📅 ${a.workDays} JS · ${a.dispoDays} DISPO · ${a.cpDays} CP<br>⚠️ ${a.forced.length} alerte(s)</div></td>${cells}</tr>`;
+    return `<tr><td class="agent"><div class="agent-name"><span class="avatar">${initials}</span>${a.name}</div><div class="agent-meta">⏱ ${durH(a.totalWorkMin)} période<br>📅 ${a.workDays} JS · ${a.dispoDays} DISPO · ${a.cpDays} CP<br>🌅 ${a.familyCounts?.MATIN||0} matin · 🕛 ${a.familyCounts?.JOURNEE||0} journée · 🌙 ${a.familyCounts?.SOIR||0} soir<br>⚠️ ${a.forced.length} alerte(s)</div></td>${cells}</tr>`;
   }).join("");
   renderBottom();
 }
