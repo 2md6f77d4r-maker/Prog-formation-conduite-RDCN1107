@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — JS Excel</title>
-<!-- Version V10.1 : attribution optimisée par rythme circadien + équité matin/journée/soir -->
+<!-- Version V10.2 : attribution optimisée rythme circadien + score du moindre écart de repos -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -107,7 +107,7 @@ body.dark .cov-ok{color:#86efac} body.dark .cov-warn{color:#fde68a} body.dark .c
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning Formateurs à partir des journées de service Excel V10.01 </p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning ADC à partir des journées de service Excel</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -119,7 +119,7 @@ body.dark .cov-ok{color:#86efac} body.dark .cov-warn{color:#fde68a} body.dark .c
     <div class="info-card"><div class="label">Fichier Excel des JS</div><div class="val" id="fileName">JS ADC Phase 4 2026.xlsx</div><div class="sub" id="fileStatus">Fichier intégré au HTML</div></div>
     <div class="info-card"><div class="label">Période planifiée</div><div class="val" id="periodInfo">-</div><div class="sub" id="periodSub">Toute la durée détectée dans l'Excel</div></div>
     <div class="info-card"><div class="label">Agents</div><div class="val">5 agents fixes</div><div class="sub">Dylan B, Gregorie L, Gaëtan C, Fabien B, Yannick H</div></div>
-    <div class="info-card"><div class="label">Règles actives</div><div class="val">140h / 28j · repos 13h</div><div class="sub">Rythme circadien : séries matin/journée/soir + équité par type</div></div>
+    <div class="info-card"><div class="label">Règles actives</div><div class="val">140h / 28j · repos 13h</div><div class="sub">Rythme circadien + moindre écart : 11h vaut mieux que 9h, 13h reste l’objectif</div></div>
     <div class="info-card"><div class="label">État</div><div class="val" id="stateInfo">Chargement...</div><div class="sub" id="stateSub">Initialisation</div></div>
   </section>
 
@@ -510,25 +510,84 @@ function updateAgentAfterAssign(agent, slot){
   }
 }
 
-function canAssign(agent, di, svc, dates){
-  if(agent.days[di]) return {ok:false,reason:"Agent déjà affecté ce jour"};
-  if(isWeekend(dates[di])) return {ok:false,reason:"Samedi/dimanche imposé en repos"};
+function getAssignmentDiagnostics(agent, di, svc, dates){
   const minRest=Number(document.getElementById("minRest").value)||13;
+  const minRestMin=minRest*60;
   let reasons=[];
-  if(di>0 && isWorking(agent.days[di-1])){
-    const r=restBetween(agent.days[di-1],svc);
-    if(r<minRest*60) reasons.push(`Repos précédent ${durH(r)} < ${minRest}h`);
+  let hardBlock=false;
+  let restPenalty=0;
+  let worstRest=99999;
+  let shortfall=0;
+
+  if(agent.days[di] && agent.days[di].type!=="DISPO"){
+    reasons.push("Agent déjà affecté ce jour");
+    hardBlock=true;
   }
-  if(di<dates.length-1 && isWorking(agent.days[di+1])){
-    const r=restBetween(svc,agent.days[di+1]);
-    if(r<minRest*60) reasons.push(`Repos suivant ${durH(r)} < ${minRest}h`);
+  if(isWeekend(dates[di])){
+    reasons.push("Samedi/dimanche imposé en repos");
+    hardBlock=true;
   }
+
+  const prev=di>0 ? agent.days[di-1] : null;
+  const next=di<dates.length-1 ? agent.days[di+1] : null;
+
+  if(isWorking(prev)){
+    const r=restBetween(prev,svc);
+    worstRest=Math.min(worstRest,r);
+    if(r<minRestMin){
+      const gap=minRestMin-r;
+      shortfall+=gap;
+      // Score progressif du moindre mal : 12h30 est presque acceptable, 11h est mieux que 9h, 9h devient très pénalisant.
+      restPenalty += gap*12;
+      if(r<12*60) restPenalty += (12*60-r)*10;
+      if(r<11*60) restPenalty += 1800 + (11*60-r)*18;
+      if(r<10*60) restPenalty += 1800 + (10*60-r)*24;
+      if(r<9*60) restPenalty += 3200 + (9*60-r)*36;
+      reasons.push(`Repos précédent ${durH(r)} < ${minRest}h`);
+    }else{
+      // Même au-dessus du minimum, on privilégie le confort quand plusieurs solutions passent.
+      if(r<15*60) restPenalty += 360;
+      else if(r<17*60) restPenalty += 120;
+      else if(r>=20*60) restPenalty -= 45;
+    }
+  }
+
+  if(isWorking(next)){
+    const r=restBetween(svc,next);
+    worstRest=Math.min(worstRest,r);
+    if(r<minRestMin){
+      const gap=minRestMin-r;
+      shortfall+=gap;
+      restPenalty += gap*12;
+      if(r<12*60) restPenalty += (12*60-r)*10;
+      if(r<11*60) restPenalty += 1800 + (11*60-r)*18;
+      if(r<10*60) restPenalty += 1800 + (10*60-r)*24;
+      if(r<9*60) restPenalty += 3200 + (9*60-r)*36;
+      reasons.push(`Repos suivant ${durH(r)} < ${minRest}h`);
+    }else{
+      if(r<15*60) restPenalty += 320;
+      else if(r<17*60) restPenalty += 100;
+    }
+  }
+
   let chain=1;
   for(let i=di-1;i>=0&&isWorking(agent.days[i]);i--) chain++;
   for(let i=di+1;i<dates.length&&isWorking(agent.days[i]);i++) chain++;
-  if(chain>5) reasons.push(`Chaîne de ${chain} jours travaillés > 5`);
-  return reasons.length?{ok:false,reason:reasons.join(" · ")}:{ok:true,reason:""};
+  let chainPenalty=0;
+  if(chain>5){
+    chainPenalty=(chain-5)*2600;
+    reasons.push(`Chaîne de ${chain} jours travaillés > 5`);
+  }
+
+  const ok=!hardBlock && !shortfall && chain<=5;
+  return {ok, hardBlock, reason:reasons.join(" · "), restPenalty, chainPenalty, shortfall, worstRest};
 }
+
+function canAssign(agent, di, svc, dates){
+  const d=getAssignmentDiagnostics(agent,di,svc,dates);
+  return d.ok ? {ok:true,reason:""} : {ok:false,reason:d.reason,hardBlock:d.hardBlock,diagnostics:d};
+}
+
 function scoreAgent(agent, di, svc, dates, force=false){
   initRhythmStats(agent);
   const allAgents=planning?.agents||[];
@@ -537,6 +596,10 @@ function scoreAgent(agent, di, svc, dates, force=false){
   const fam=serviceFamily(svc);
   const famTotal=allAgents.reduce((sum,a)=>sum+(initRhythmStats(a)[fam]||0),0);
   const famAvg=famTotal/(allAgents.length||1);
+  const diag=getAssignmentDiagnostics(agent,di,svc,dates);
+
+  if(diag.hardBlock) return 999999999; // on n'écrase jamais une journée déjà attribuée et on respecte les repos week-end imposés.
+
   let s=(totalH-avgH)*2 + agent.workDays*80 - agent.dispoDays*25 + Math.sin((di+1)*(agent.name.length+seed))*45;
 
   // Équité spécifique : celui qui a déjà beaucoup de matins/soirs prend une pénalité sur ce même type.
@@ -552,22 +615,12 @@ function scoreAgent(agent, di, svc, dates, force=false){
   if(run>=1 && run<=3) s-=90*run;
   if(run>=4) s+=180*(run-3); // évite qu'un agent absorbe toute une famille de journées
 
-  // Repos qualitatif : même si 13h est légal/autorisé, on évite les enchaînements trop serrés quand une autre solution existe.
-  const minRest=Number(document.getElementById("minRest").value)||13;
-  if(isWorking(prev)){
-    const r=restBetween(prev,svc);
-    if(r>=minRest*60 && r<15*60) s+=260;
-    else if(r<17*60) s+=90;
-    else if(r>=20*60) s-=35;
-  }
-  if(isWorking(next)){
-    const r=restBetween(svc,next);
-    if(r>=minRest*60 && r<15*60) s+=220;
-    else if(r<17*60) s+=70;
-  }
+  // Repos qualitatif et "moindre écart" : en mode forcé, on classe finement 11h mieux que 9h.
+  s += diag.restPenalty + diag.chainPenalty;
+  if(!diag.ok && !force) s+=999999;
+  if(!diag.ok && force) s+=1200; // autorise le moindre mal, sans le préférer à une solution strictement conforme.
 
   if(svc.workMin>7*60 && totalH>avgH) s+=180;
-  const ck=canAssign(agent,di,svc,dates); if(!ck.ok) s+=force?500:999999;
   return s;
 }
 
@@ -674,7 +727,11 @@ function generatePlanning(){
       let forced=false, reason="";
       if(!candidates.length){
         forced=true;
-        candidates=agents.map(a=>({a,ck:canAssign(a,di,js,dates)}));
+        // Mode moindre mal : on ne garde que les agents libres ce jour-là.
+        // Ensuite le score choisit l'écart le moins mauvais : 11h est privilégié face à 9h, 12h face à 11h, etc.
+        candidates=agents
+          .map(a=>({a,ck:canAssign(a,di,js,dates)}))
+          .filter(x=>!x.ck.hardBlock);
       }
       candidates.sort((x,y)=>scoreAgent(x.a,di,js,dates,forced)-scoreAgent(y.a,di,js,dates,forced));
       const best=candidates[0]; if(!best){planning.uncovered.push({date,js,reason:"Aucun agent disponible"});return}
@@ -692,13 +749,21 @@ function generatePlanning(){
   });
   tryRepairPlanning();
   renderPlanning();
-  setState("Prêt","Planning généré avec optimisation du rythme circadien, équité et réparation automatique des journées rouges quand c’est possible.");
+  setState("Prêt","Planning généré avec optimisation du rythme circadien, score du moindre écart de repos et réparation automatique des journées rouges quand c’est possible.");
 }
 function getRequiredForDate(di){
   if(!planning || !planning.dates || !planning.dates[di]) return [];
   const date=planning.dates[di], k=dateKey(date);
   if(isWeekend(date)) return [];
   return (extractedJS||[]).filter(js=>(js.dates||[]).some(d=>dateKey(d)===k));
+}
+function isServicePlannedOnDate(svc, di){
+  if(!svc || !planning || !planning.dates || !planning.dates[di]) return false;
+  const k=dateKey(planning.dates[di]);
+  return (svc.dates||[]).some(d=>dateKey(d)===k);
+}
+function offRegimeReason(svc, di){
+  return `JS ${svc?.code||"?"} non prévue au régime Excel le ${fmt(planning.dates[di])}`;
 }
 function getCoveredForDate(di){
   if(!planning) return [];
@@ -738,7 +803,18 @@ function computeWarnings(){
     a.days.forEach((s,di)=>{
       if(isWorking(s)){a.totalWorkMin+=s.workMin||0;if(s.type==="DISPO"){a.dispoDays++;planning.dispoCount++;}else {a.workDays++; const f=serviceFamily(s); a.familyCounts[f]=(a.familyCounts[f]||0)+1;}}
       if(s && s.type==="CP") a.cpDays++;
-      if(s && s.type==="WORK") s.reason=s.forced?s.reason:"";
+      if(s && s.type==="WORK"){
+        const offRegime=!isServicePlannedOnDate(s,di);
+        const existingReason=s.forced?s.reason:"";
+        s.reason=existingReason||"";
+        if(offRegime){
+          s.forced=true;
+          const msg=offRegimeReason(s,di);
+          if(!s.reason || !s.reason.includes(msg)) s.reason=s.reason ? s.reason+" · "+msg : msg;
+        }else if(!s.forced){
+          s.reason="";
+        }
+      }
     });
     for(let di=1;di<a.days.length;di++){
       const p=a.days[di-1], c=a.days[di];
@@ -843,7 +919,7 @@ function openDetail(ai,di){
   codesAvailable.forEach(c=>{
     html+=`<div class="edit-opt work${s.code===c&&s.type==="WORK"?" selected":""}" onclick="setManual(${ai},${di},'WORK','${c.replace(/'/g,"\'")}')"><b>${escapeHtml(c)}</b><small>Affecter cette JS</small></div>`;
   });
-  html+=`</div><div class="hint" style="margin-bottom:14px">Si tu mets une journée en repos, CP ou DISPO, la JS supprimée repasse automatiquement en <b>journée non couverte</b> et le compteur du jour devient rouge/orange. Elle sera proposée en haut de cette fenêtre dans “Journées à couvrir ce jour”. Si la règle des 13h de repos n'est pas respectée, une confirmation te sera demandée pour forcer.</div>`;
+  html+=`</div><div class="hint" style="margin-bottom:14px">Si tu mets une journée en repos, CP ou DISPO, la JS supprimée repasse automatiquement en <b>journée non couverte</b> et le compteur du jour devient rouge/orange. Elle sera proposée en haut de cette fenêtre dans “Journées à couvrir ce jour”. Si la règle des 13h de repos n'est pas respectée, une confirmation te sera demandée pour forcer. Si tu affectes une JS sur une date où elle n'est pas prévue au régime Excel, elle passera en erreur rouge.</div>`;
 
   html+=`<div class="detail-grid">
     <div class="detail-box"><span>Type</span>${s.type==="WORK"?"Travail":s.type==="DISPO"?"DISPO":s.type==="CP"?"Congé payé":"Repos"}</div>
@@ -928,12 +1004,19 @@ function setManual(ai,di,type,code){
     const k=dateKey(planning.dates[di]);
     const js=(extractedJS||[]).find(j=>j.code===code && (j.dates||[]).some(d=>dateKey(d)===k)) || (extractedJS||[]).find(j=>j.code===code);
     if(!js){alert("JS introuvable.");return}
+    const offRegime=!(js.dates||[]).some(d=>dateKey(d)===k);
     a.days[di]=null;
     const ck=canAssign(a,di,js,planning.dates);
     let forced=false, reason="Affecté manuellement";
+    if(offRegime){
+      forced=true;
+      reason=offRegimeReason(js,di);
+      alert("⚠️ "+reason+".\n\nLa cellule sera mise en rouge, car cette journée n'est pas prévue à cette date dans le régime Excel.");
+    }
     if(!ck.ok){
-      if(!confirm("⚠️ "+ck.reason+"\n\nForcer quand même cette affectation ?")){ a.days[di]=old; return; }
-      forced=true; reason=ck.reason;
+      const combined=forced ? reason+" · "+ck.reason : ck.reason;
+      if(!confirm("⚠️ "+combined+"\n\nForcer quand même cette affectation ?")){ a.days[di]=old; return; }
+      forced=true; reason=combined;
     }
     a.days[di]={...js,type:"WORK",forced,reason};
   }
@@ -946,7 +1029,7 @@ function closeModal(){document.getElementById("detailModal").classList.remove("o
 function openHelp(){
   document.getElementById("modalTitle").textContent="Aide";
   document.getElementById("modalSub").textContent="Fonctionnement du générateur";
-  document.getElementById("modalBody").innerHTML=`<div class="item">Le fichier Excel intégré est lu automatiquement. Le tableau des journées extraites est volontairement masqué.</div><div class="item">Les samedis et dimanches sont placés en repos pour tous. Les JS présentes ces jours-là sont listées en bas comme non couvertes volontairement.</div><div class="item">Les jours ouvrés sans JS attribuée deviennent DISPO.</div><div class="item bad-i">Si une JS ne peut pas respecter les 13h de repos, elle est quand même attribuée pour garantir la couverture et la cellule devient rouge avec explication au survol.</div>`;
+  document.getElementById("modalBody").innerHTML=`<div class="item">Le fichier Excel intégré est lu automatiquement. Le tableau des journées extraites est volontairement masqué.</div><div class="item">Les samedis et dimanches sont placés en repos pour tous. Les JS présentes ces jours-là sont listées en bas comme non couvertes volontairement.</div><div class="item">Les jours ouvrés sans JS attribuée deviennent DISPO.</div><div class="item bad-i">Si une JS ne peut pas respecter les 13h de repos, elle peut être attribuée en moindre mal et la cellule devient rouge avec explication au survol. Une JS affectée sur une date non prévue par son régime Excel passe aussi en erreur rouge.</div>`;
   document.getElementById("detailModal").classList.add("open");
 }
 function exportExcel(){
