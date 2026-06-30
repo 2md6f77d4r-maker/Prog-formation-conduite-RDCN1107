@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -126,7 +127,7 @@ body.dark .cov-ok{color:#86efac} body.dark .cov-warn{color:#fde68a} body.dark .c
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel 10_V06 </p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_07 </p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -187,6 +188,8 @@ const EMBEDDED_XLSX_BASE64 = "UEsDBBQABgAIAAAAIQCCEG1mxwIAAE8lAAATAAgCW0NvbnRlbn
 const AGENTS = ["Dylan B","Gregorie L","Gaëtan C","Fabien B","Yannick H"];
 const AUTOSAVE_KEY = "programmation_caen_autosave_v1"; // clé volontairement stable entre les versions HTML
 const APP_VERSION = "06";
+const SAVE_SCHEMA_VERSION = 2;
+const SAVE_MIN_COMPATIBLE_VERSION = 1;
 let autosaveReady = false;
 const DEFAULT_ABSENCES = [
   {agent:"Dylan B", start:"2026-08-31", end:"2026-09-11", type:"CP", reason:"CP intégré par défaut : 31/08 au 11/09 inclus"},
@@ -810,7 +813,10 @@ function serializePlanningForSave(){
   if(!planning) return null;
   return {
     app:"programmation-caen",
+    saveVersion:SAVE_SCHEMA_VERSION,
+    minCompatibleSaveVersion:SAVE_MIN_COMPATIBLE_VERSION,
     appVersion:APP_VERSION,
+    softwareVersion:"V"+APP_VERSION,
     savedAt:new Date().toISOString(),
     seed,
     sourceFileName:document.getElementById("fileName")?.textContent||"",
@@ -825,6 +831,85 @@ function serializePlanningForSave(){
     planning
   };
 }
+function normalizeSavedSlot(slot){
+  if(!slot || typeof slot!=="object") return null;
+  const normalized={...slot};
+  if(!normalized.type){
+    if(normalized.code==="R") normalized.type="REST";
+    else if(normalized.code==="CP") normalized.type="CP";
+    else if(normalized.code==="AST") normalized.type="ASTREINTE";
+    else if(normalized.code==="DISPO") normalized.type="DISPO";
+    else normalized.type="WORK";
+  }
+  if(normalized.type==="REST" && !normalized.code) normalized.code="R";
+  if(normalized.type==="DISPO"){
+    normalized.code=normalized.code||"DISPO";
+    normalized.startMin=normalized.startMin ?? 10*60;
+    normalized.endMin=normalized.endMin ?? 15*60;
+    normalized.workMin=normalized.workMin ?? 5*60;
+    normalized.amplitudeMin=normalized.amplitudeMin ?? 5*60;
+  }
+  if(normalized.type==="CP"){
+    normalized.code=normalized.code||"CP";
+    normalized.workMin=0;
+    normalized.amplitudeMin=0;
+  }
+  if(normalized.type==="ASTREINTE"){
+    normalized.code=normalized.code||"AST";
+    normalized.startMin=normalized.startMin ?? 8*60;
+    normalized.endMin=normalized.endMin ?? 16*60;
+    normalized.workMin=normalized.workMin ?? 8*60;
+    normalized.amplitudeMin=normalized.amplitudeMin ?? 8*60;
+  }
+  if(typeof normalized.workMin!=="number") normalized.workMin=0;
+  if(typeof normalized.amplitudeMin!=="number") normalized.amplitudeMin=normalized.workMin||0;
+  normalized.forced=!!normalized.forced;
+  return normalized;
+}
+function migrateSaveFile(obj){
+  if(!obj || typeof obj!=="object") throw new Error("Fichier de sauvegarde vide ou illisible.");
+  if(obj.app && obj.app!=="programmation-caen") throw new Error("Cette sauvegarde ne correspond pas au logiciel Programmation Caen.");
+  if(!obj.planning) throw new Error("La sauvegarde ne contient pas de planning.");
+  const version=Number(obj.saveVersion||1);
+  if(version>SAVE_SCHEMA_VERSION){
+    console.warn("Sauvegarde créée avec une version plus récente du logiciel. Tentative de lecture tolérante.", version);
+  }
+  const migrated={...obj, app:"programmation-caen", saveVersion:version, migratedFromSaveVersion:version};
+  migrated.appVersion=migrated.appVersion || migrated.softwareVersion || "ancienne";
+  migrated.softwareVersion=migrated.softwareVersion || (migrated.appVersion ? String(migrated.appVersion) : "ancienne");
+  migrated.savedAt=migrated.savedAt || new Date().toISOString();
+  migrated.seed=migrated.seed || 1;
+  migrated.controls=migrated.controls || {};
+  ["dateStart","dateEnd","targetHours","minRest28","minRest"].forEach(k=>{
+    if(migrated.controls[k]===undefined || migrated.controls[k]===null) migrated.controls[k]="";
+  });
+  if(!migrated.controls.targetHours) migrated.controls.targetHours="140";
+  if(!migrated.controls.minRest28) migrated.controls.minRest28="8";
+  if(!migrated.controls.minRest) migrated.controls.minRest="13";
+  migrated.extractedJS=Array.isArray(migrated.extractedJS) ? migrated.extractedJS : [];
+  const p=migrated.planning;
+  p.dates=Array.isArray(p.dates) ? p.dates : [];
+  p.agents=Array.isArray(p.agents) ? p.agents : [];
+  p.uncovered=Array.isArray(p.uncovered) ? p.uncovered : [];
+  p.forced=Array.isArray(p.forced) ? p.forced : [];
+  p.dispoCount=Number(p.dispoCount||0);
+  p.agents.forEach(a=>{
+    a.name=a.name||"Agent";
+    a.days=Array.isArray(a.days) ? a.days : [];
+    a.days=a.days.map(normalizeSavedSlot);
+    a.totalWorkMin=Number(a.totalWorkMin||0);
+    a.workDays=Number(a.workDays||0);
+    a.dispoDays=Number(a.dispoDays||0);
+    a.cpDays=Number(a.cpDays||0);
+    a.forced=Array.isArray(a.forced) ? a.forced : [];
+    a.familyCounts=a.familyCounts||{MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
+    ["MATIN","JOURNEE","SOIR","AUTRE"].forEach(k=>{a.familyCounts[k]=Number(a.familyCounts[k]||0);});
+  });
+  migrated.planning=p;
+  migrated.saveVersion=SAVE_SCHEMA_VERSION;
+  migrated.migratedAt=new Date().toISOString();
+  return migrated;
+}
 function reviveSlot(slot){
   if(!slot) return slot;
   if(slot.dates) slot.dates=slot.dates.map(x=>new Date(x));
@@ -832,6 +917,7 @@ function reviveSlot(slot){
 }
 function reviveSavedPlanning(obj){
   if(!obj || !obj.planning) return null;
+  obj=migrateSaveFile(obj);
   const p=obj.planning;
   p.dates=(p.dates||[]).map(x=>new Date(x));
   (p.agents||[]).forEach(a=>{a.days=(a.days||[]).map(reviveSlot); a.forced=a.forced||[]; a.familyCounts=a.familyCounts||{MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};});
@@ -874,7 +960,9 @@ function saveAutoPlanning(){
 function loadAutoPlanning(){
   try{
     const raw=localStorage.getItem(AUTOSAVE_KEY); if(!raw) return false;
-    const obj=JSON.parse(raw);
+    let obj=JSON.parse(raw);
+    obj=migrateSaveFile(obj);
+    try{localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(obj));}catch(_e){}
     if(obj.controls){Object.entries(obj.controls).forEach(([id,val])=>{const el=document.getElementById(id); if(el) el.value=val;});}
     const restored=reviveSavedPlanning(obj); if(!restored || !restored.dates?.length) return false;
     planning=restored; seed=obj.seed||seed;
@@ -923,8 +1011,8 @@ function handleProgrammingSaveFile(ev){
   const rd=new FileReader();
   rd.onload=e=>{
     try{
-      const obj=JSON.parse(String(e.target.result||""));
-      if(!obj || obj.app!=="programmation-caen" || !obj.planning){alert("Ce fichier ne semble pas être une sauvegarde de programmation Caen valide.");return;}
+      let obj=JSON.parse(String(e.target.result||""));
+      obj=migrateSaveFile(obj);
       if(obj.controls){Object.entries(obj.controls).forEach(([id,val])=>{const el=document.getElementById(id); if(el) el.value=val;});}
       if(obj.extractedJS && Array.isArray(obj.extractedJS)) extractedJS=reviveExtractedServices(obj.extractedJS);
       const restored=reviveSavedPlanning(obj);
@@ -938,7 +1026,8 @@ function handleProgrammingSaveFile(ev){
       document.getElementById("fileName").textContent=obj.sourceFileName||f.name;
       document.getElementById("fileStatus").textContent=`Programmation ouverte depuis ${f.name} · sauvegarde navigateur reprise`;
       updateAutoSaveIndicator("idle", savedDate);
-      setState("Programmation ouverte",`Sauvegarde ${f.name} chargée avec succès (${planning.agents?.length||0} agents, ${planning.dates?.length||0} jours).`);
+      const compatMsg=obj.migratedFromSaveVersion && obj.migratedFromSaveVersion!==SAVE_SCHEMA_VERSION ? ` · sauvegarde ancienne migrée v${obj.migratedFromSaveVersion}→v${SAVE_SCHEMA_VERSION}` : "";
+      setState("Programmation ouverte",`Sauvegarde ${f.name} chargée avec succès (${planning.agents?.length||0} agents, ${planning.dates?.length||0} jours)${compatMsg}.`);
     }catch(err){console.error(err); alert("Impossible d'ouvrir cette sauvegarde : "+(err?.message||err));}
   };
   rd.readAsText(f,"utf-8");
@@ -1038,35 +1127,73 @@ function computeWarnings(){
   const minRest=Number(document.getElementById("minRest").value)||13;
   planning.forced=[];
   planning.dispoCount=0;
+
   planning.agents.forEach(a=>{
-    a.totalWorkMin=0; a.workDays=0; a.dispoDays=0; a.cpDays=0; a.forced=[]; a.familyCounts={MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
+    a.totalWorkMin=0;
+    a.workDays=0;
+    a.dispoDays=0;
+    a.cpDays=0;
+    a.forced=[];
+    a.familyCounts={MATIN:0,JOURNEE:0,SOIR:0,AUTRE:0};
+
     a.days.forEach((s,di)=>{
-      if(isWorking(s)){a.totalWorkMin+=s.workMin||0;if(s.type==="DISPO"){a.dispoDays++;planning.dispoCount++;}else {a.workDays++; const f=serviceFamily(s); a.familyCounts[f]=(a.familyCounts[f]||0)+1;}}
-      if(s && s.type==="CP") a.cpDays++;
-      if(s && s.type==="WORK"){
-        const offRegime=!isServicePlannedOnDate(s,di);
-        const existingReason=s.forced?s.reason:"";
-        s.reason=existingReason||"";
-        if(offRegime){
-          s.forced=true;
-          const msg=offRegimeReason(s,di);
-          if(!s.reason || !s.reason.includes(msg)) s.reason=s.reason ? s.reason+" · "+msg : msg;
-        }else if(!s.forced){
-          s.reason="";
+      if(!s) return;
+
+      // Remise à zéro des anciennes alertes calculées.
+      // Important : si une journée est modifiée, les alertes de la veille et du lendemain
+      // doivent être recalculées proprement et ne pas rester affichées à tort.
+      if(s.type==="WORK"){
+        s.forced=false;
+        s.reason="";
+      }
+
+      if(isWorking(s)){
+        a.totalWorkMin+=s.workMin||0;
+        if(s.type==="DISPO"){
+          a.dispoDays++;
+          planning.dispoCount++;
+        }else{
+          a.workDays++;
+          const f=serviceFamily(s);
+          a.familyCounts[f]=(a.familyCounts[f]||0)+1;
         }
+      }
+      if(s.type==="CP") a.cpDays++;
+    });
+  });
+
+  planning.agents.forEach(a=>{
+    a.days.forEach((s,di)=>{
+      if(!s || s.type!=="WORK") return;
+
+      const reasons=[];
+
+      // Vérifie que la JS est bien prévue au régime Excel sur cette date.
+      if(!isServicePlannedOnDate(s,di)){
+        reasons.push(offRegimeReason(s,di));
+      }
+
+      // Vérifie la journée avec la veille ET avec le lendemain.
+      // On retire temporairement la cellule courante pour éviter que le diagnostic
+      // considère l'agent comme déjà affecté sur sa propre journée.
+      const saved=a.days[di];
+      a.days[di]=null;
+      const diag=getAssignmentDiagnostics(a,di,s,planning.dates);
+      a.days[di]=saved;
+
+      if(!diag.ok && diag.reason){
+        reasons.push(diag.reason);
+      }
+
+      if(reasons.length){
+        s.forced=true;
+        s.reason=[...new Set(reasons.join(" · ").split(" · ").filter(Boolean))].join(" · ");
+      }else{
+        s.forced=false;
+        s.reason="";
       }
     });
-    for(let di=1;di<a.days.length;di++){
-      const p=a.days[di-1], c=a.days[di];
-      if(isWorking(p)&&isWorking(c)){
-        const r=restBetween(p,c);
-        if(r<minRest*60){
-          c.forced=true;
-          const add=`Repos entre ${p.code} et ${c.code} : ${durH(r)} < ${minRest}h`;
-          c.reason=c.reason ? c.reason+" · "+add : add;
-        }
-      }
-    }
+
     a.days.forEach((s,di)=>{
       if(s && s.type==="WORK" && s.forced){
         a.forced.push({di,slot:s,reason:s.reason});
@@ -1074,9 +1201,9 @@ function computeWarnings(){
       }
     });
   });
+
   rebuildUncovered();
 }
-
 
 function getDayCoverage(di){
   if(!planning || !planning.dates || !planning.dates[di]) return {covered:0,required:0,label:"-",cls:"cov-rest"};
