@@ -668,7 +668,7 @@ function loadWorkbookArrayBuffer(buf, name){
     fillDefaultDates();
     clearPlanningDisplayForSecurity();
     updateGenerationLock();
-    setState("Sauvegarde requise","Excel prêt. Ouvre une sauvegarde de programmation (.pcprog) pour afficher qui fait quoi.");
+    setState("Sauvegarde requise"," logiciel prêt. Ouvre une sauvegarde de programmation (.pcprog) ");
   }catch(e){console.error(e);setState("Erreur","Impossible de lire l'Excel : "+e.message);}
 }
 
