@@ -1,12 +1,13 @@
 
 
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — JS Excel</title>
-<!-- Version 06.20 : colonnes Tâche/Début/Fin/Train détectées dynamiquement (plage B1:S38) — corrige les tâches décalées dans les exports PDF et BCS -->
+<!-- Version 06.21 : correction calcul couverture JS (formateurs uniquement), synchronisation dynamique formateur→stagiaires, opacité stagiaires renforcée -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -171,12 +172,23 @@ body.dark .trainee-pill.f1{color:#bfdbfe} body.dark .trainee-pill.f2{color:#bbf7
 .trainee-error.warn{border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.12)}
 .trainee-error b{font-weight:950}
 @media(max-width:900px){.pedagogy-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:620px){.pedagogy-grid{grid-template-columns:1fr}.pedagogy-list{grid-template-columns:1fr}}
+
+
+/* === V06.21 : opacité renforcée stagiaires / fenêtres déroulantes === */
+.modal,.modal *{backdrop-filter:none}
+.modal{background:var(--solid)!important;opacity:1!important}
+.edit-grid,.manual-box,.detail-box,.service-order-actions{background:var(--solid)!important}
+.plan tr.trainee-row td.agent{background:var(--solid)!important;opacity:1!important}
+.tile.trainee-work,.tile.trainee-work.f1,.tile.trainee-work.f2{opacity:1!important;backdrop-filter:none!important}
+body.dark .plan tr.trainee-row td.agent{background:#0b1220!important}
+body.dark .edit-grid,body.dark .manual-box,body.dark .detail-box,body.dark .service-order-actions{background:#0b1220!important}
+
 </style>
 </head>
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.20 tâches BCS corrigées · élèves F1/F2 · suivi 35h</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.21 affectations stagiaires dynamiques · calcul JS corrigé · suivi 35h</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -1674,7 +1686,11 @@ function offRegimeReason(svc, di){
 }
 function getCoveredForDate(di){
   if(!planning) return [];
+  // Une JS est considérée couverte uniquement par un formateur.
+  // Les stagiaires suivent la journée du formateur mais ne doivent jamais compter
+  // comme couverture supplémentaire, sinon les compteurs 2/1, 4/1, etc. deviennent faux.
   return (planning.agents||[])
+    .filter(a=>a.role!=="ELEVE")
     .map(a=>a.days?.[di])
     .filter(s=>s && s.type==="WORK");
 }
@@ -1701,11 +1717,62 @@ function rebuildUncovered(){
     getMissingForDate(di).forEach(js=>planning.uncovered.push({date,js,reason:"À couvrir suite à une modification manuelle ou absence d'attribution"}));
   });
 }
+
+function chooseTraineeTrainerForSlot(di, trainee, preferredTrainerName="", preferredCode=""){
+  if(!planning || !planning.agents) return null;
+  const trainers=(planning.agents||[]).filter(a=>a.role!=="ELEVE" && a.days?.[di]?.type==="WORK");
+  if(!trainers.length) return null;
+  const currentLoads={};
+  (planning.agents||[]).filter(a=>a.role==="ELEVE" && a!==trainee).forEach(st=>{
+    const sl=st.days?.[di];
+    if(sl && sl.type==="WORK" && sl.trainerName) currentLoads[sl.trainerName]=(currentLoads[sl.trainerName]||0)+1;
+  });
+  const scored=trainers.map(t=>{
+    const sl=t.days[di];
+    const load=currentLoads[t.name]||0;
+    let score=load*1000 + (t.studentDays||0)*5 + (t.workDays||0);
+    if(preferredTrainerName && t.name===preferredTrainerName) score-=5000;
+    if(preferredCode && sl.code===preferredCode) score-=800;
+    return {trainer:t,slot:sl,load,score};
+  }).filter(x=>x.load<3).sort((a,b)=>a.score-b.score || String(a.trainer.name).localeCompare(String(b.trainer.name),"fr"));
+  return scored[0] || null;
+}
+
+function synchronizeTraineesWithTrainers(){
+  if(!planning || !planning.agents || !planning.dates) return;
+  const trainees=(planning.agents||[]).filter(a=>a.role==="ELEVE");
+  if(!trainees.length) return;
+  trainees.forEach(t=>{t.trainerCounts={};});
+
+  planning.dates.forEach((date,di)=>{
+    const activeFormation=formationTagForDate(date);
+    trainees.forEach(st=>{
+      const slot=st.days?.[di];
+      if(!slot || slot.type!=="WORK") return;
+
+      const preferredTrainerName=slot.trainerName||"";
+      const preferredCode=slot.code||"";
+      const chosen=chooseTraineeTrainerForSlot(di,st,preferredTrainerName,preferredCode);
+
+      if(!chosen || (activeFormation && st.formation && activeFormation!==st.formation)){
+        st.days[di]=makeDispoSlot();
+        st.days[di].reason=chosen ? "Période formation différente : retrait automatique de la JS stagiaire" : "Aucun formateur en conduite ce jour : retrait automatique de la JS stagiaire";
+        return;
+      }
+
+      const tr=chosen.trainer;
+      const trSlot=chosen.slot;
+      st.days[di]={...trSlot,type:"WORK",forced:false,reason:`Synchronisé automatiquement avec ${tr.name}`,trainerName:tr.name,formation:st.formation||activeFormation||slot.formation||""};
+    });
+  });
+}
+
 function computeWarnings(){
   const minRest=Number(document.getElementById("minRest").value)||13;
   planning.forced=[];
   planning.dispoCount=0;
   removeTraineeAstreintes();
+  synchronizeTraineesWithTrainers();
 
   planning.agents.forEach(a=>{
     a.totalWorkMin=0;
@@ -1814,7 +1881,7 @@ function getDayCoverage(di){
   if(isWeekend(date)) return {covered:0,required:0,label:"Repos",cls:"cov-rest"};
   const k=dateKey(date);
   const required=(extractedJS||[]).reduce((n,js)=>n+(((js.dates||[]).some(d=>dateKey(d)===k))?1:0),0);
-  const covered=(planning.agents||[]).reduce((n,a)=>{const s=a.days?.[di]; return n+(s && s.type==="WORK" ? 1 : 0);},0);
+  const covered=(planning.agents||[]).reduce((n,a)=>{const s=a.days?.[di]; return n+(a.role!=="ELEVE" && s && s.type==="WORK" ? 1 : 0);},0);
   let cls="cov-ok";
   if(required===0) cls="cov-rest";
   else if(covered<=0) cls="cov-bad";
