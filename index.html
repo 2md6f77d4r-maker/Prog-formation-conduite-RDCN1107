@@ -174,7 +174,7 @@ body.dark .trainee-pill.f1{color:#bfdbfe} body.dark .trainee-pill.f2{color:#bbf7
 @media(max-width:900px){.pedagogy-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:620px){.pedagogy-grid{grid-template-columns:1fr}.pedagogy-list{grid-template-columns:1fr}}
 
 
-/* === V06.21 : opacité renforcée stagiaires / fenêtres déroulantes === */
+/* === V06.22 : opacité renforcée stagiaires / fenêtres déroulantes === */
 .modal,.modal *{backdrop-filter:none}
 .modal{background:var(--solid)!important;opacity:1!important}
 .edit-grid,.manual-box,.detail-box,.service-order-actions{background:var(--solid)!important}
@@ -188,7 +188,7 @@ body.dark .edit-grid,body.dark .manual-box,body.dark .detail-box,body.dark .serv
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.21 affectations stagiaires dynamiques · calcul JS corrigé · suivi 35h</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.22 affectations stagiaires manuelles corrigées · calcul JS corrigé · suivi 35h</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -1750,6 +1750,16 @@ function synchronizeTraineesWithTrainers(){
       const slot=st.days?.[di];
       if(!slot || slot.type!=="WORK") return;
 
+      // Correction V06.22 :
+      // Une journée créée/modifiée à la main sur un stagiaire doit rester prioritaire.
+      // Avant, le recalcul synchronisait systématiquement le stagiaire avec le formateur
+      // et remplaçait la journée manuelle par l'ancienne journée du formateur.
+      if(slot.manualTraineeOverride || slot.manualCreated){
+        slot.formation=st.formation||activeFormation||slot.formation||"";
+        slot.reason=slot.reason || "Affectation stagiaire conservée car modifiée manuellement";
+        return;
+      }
+
       const preferredTrainerName=slot.trainerName||"";
       const preferredCode=slot.code||"";
       const chosen=chooseTraineeTrainerForSlot(di,st,preferredTrainerName,preferredCode);
@@ -2209,7 +2219,7 @@ function createManualJS(ai,di){
   const key=dateKey(d);
   const exists=(extractedJS||[]).some(j=>j.manualCreated && j.code===code && (j.dates||[]).some(x=>dateKey(x)===key));
   if(!exists) extractedJS.push(js);
-  a.days[di]={...js,type:"WORK",forced,reason};
+  a.days[di]={...js,type:"WORK",forced,reason,manualTraineeOverride:a.role==="ELEVE",formation:a.role==="ELEVE"?(a.formation||js.formation||""):(js.formation||""),trainerName:a.role==="ELEVE"?"":(js.trainerName||"")};
   computeWarnings();
   renderPlanning();
   closeModal();
@@ -2259,7 +2269,7 @@ function setManual(ai,di,type,code){
       if(trainers[0]) traineeTrainerName=trainers[0].name;
       else { forced=true; reason=[reason,"Aucun formateur compatible trouvé pour ce stagiaire"].filter(Boolean).join(" · "); }
     }
-    a.days[di]={...js,type:"WORK",forced,reason,trainerName:traineeTrainerName || (a.role==="ELEVE"?(js.trainerName||""):(js.trainerName||"")),formation:a.role==="ELEVE"?(a.formation||js.formation||""):(js.formation||"")};
+    a.days[di]={...js,type:"WORK",forced,reason,manualTraineeOverride:a.role==="ELEVE",trainerName:traineeTrainerName || (a.role==="ELEVE"?(js.trainerName||""):(js.trainerName||"")),formation:a.role==="ELEVE"?(a.formation||js.formation||""):(js.formation||"")};
   }
   computeWarnings();
   renderPlanning();
