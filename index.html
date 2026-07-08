@@ -7,7 +7,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — JS Excel</title>
-<!-- Version 06.21 : correction calcul couverture JS (formateurs uniquement), synchronisation dynamique formateur→stagiaires, opacité stagiaires renforcée -->
+<!-- Version 06.23 : ajout export calendrier .ics formateurs/élèves, jour par jour et programmation complète agent -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -188,7 +188,7 @@ body.dark .edit-grid,body.dark .manual-box,body.dark .detail-box,body.dark .serv
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.22 affectations stagiaires manuelles corrigées · calcul JS corrigé · suivi 35h</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.24 libellés ICS clarifiés formateurs/élèves · affectations stagiaires manuelles corrigées · calcul JS corrigé · suivi 35h</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -220,6 +220,7 @@ body.dark .edit-grid,body.dark .manual-box,body.dark .detail-box,body.dark .serv
       <button class="btn green" onclick="exportExcel()">📥 Export Excel</button>
       <button class="btn red" onclick="exportPDF()">📄 Export PDF</button>
       <button class="btn green" onclick="generateServiceOrderPocket()">📑 Pochette BCS complète</button>
+      <button class="btn purple" onclick="generateIcsAllPlanning()">📆 ICS toute la programmation</button>
       <button class="btn orange" onclick="restoreEmbedded()">↩ Relire l’Excel intégré</button>
       <button class="btn gray" onclick="resetPlanning()">🧹 Réinitialiser</button>
       <button class="btn green" onclick="exportProgrammingSave()">💾 Sauvegarder programmation</button>
@@ -1970,7 +1971,7 @@ function renderPlanning(){
       return `<td class="slot"><div class="tile ${cls}" title="${escapeHtml(title)}" onclick="openDetail(${ai},${di})">${formationBadgeHtml(planning.dates[di],s,a)}<div class="code">${code}</div>${serviceTypeHtml(s)}<div class="hours">${h}</div>${ex?`<div class="extra">${ex}</div>`:""}</div></td>`
     }).join("");
     const roleLine=a.role==="ELEVE" ? `🎓 Élève ${a.formation||""} · ${a.workDays} conduite · ⚠️35h ${a.weeklyWarnings?.length||0} · formateurs ${Object.entries(a.trainerCounts||{}).filter(x=>x[1]).map(([k,v])=>`${k}:${v}`).join(' · ')||'—'}` : `📅 ${a.workDays}JS ${a.dispoDays}D ${a.cpDays}CP · 🟧${a.astreinteDays||0}AST · 🎓${a.studentDays||0} élève-jour · ⚠️${a.forced.length}`;
-    const pocketBtn=`<button class="agent-pocket" onclick="event.stopPropagation();generateServiceOrderAgent(${ai})">${a.role==="ELEVE" ? "📑 Journées élève" : "📑 Pochette"}</button>`;
+    const pocketBtn=`<button class="agent-pocket" onclick="event.stopPropagation();generateServiceOrderAgent(${ai})">${a.role==="ELEVE" ? "📑 Journées élève" : "📑 Pochette"}</button><button class="agent-pocket" onclick="event.stopPropagation();generateIcsAgent(${ai})">📆 ICS agent complet</button>`;
     const rowClass=a.role==="ELEVE" ? ` class="trainee-row ${String(a.formation||"").toLowerCase()}"` : "";
     const formationPill=a.role==="ELEVE" ? `<span class="trainee-pill ${String(a.formation||"").toLowerCase()}">🎓 ${a.formation||""}</span><span class="trainee-pill ${String(a.formation||"").toLowerCase()}">0 AST</span>` : "";
     return `<tr${rowClass}><td class="agent"><div class="agent-name"><span class="avatar">${initials}</span>${a.name}</div><div class="agent-meta">${a.role==="ELEVE"?('Stagiaire '+(a.formation||'')):'Formateur'} ${formationPill} · ⏱ ${durH(a.totalWorkMin)} · 🚆TT ${durH(a.trainHeadMin||0)}<br>${roleLine}<br>🌅${a.familyCounts?.MATIN||0} 🕛${a.familyCounts?.JOURNEE||0} 🌙${a.familyCounts?.SOIR||0}</div>${pocketBtn}</td>${cells}</tr>`;
@@ -2125,7 +2126,7 @@ function openDetail(ai,di){
   const missingToday=getMissingForDate(di);
   const codesAvailable=[...new Set(extractedJS.map(j=>j.code))].sort((x,y)=>x.localeCompare(y,"fr",{numeric:true}));
   let html=`<div class="edit-title">✏️ Modifier manuellement cette journée</div>`;
-  html+=`<div class="service-order-actions"><button class="btn green" onclick="generateServiceOrderDay(${di})">📄 Générer les BCS du jour</button>${s.type==="WORK"?`<button class="btn primary" onclick="generateServiceOrderSingle(${ai},${di})">📄 Générer ce bulletin</button>`:""}<button class="btn purple" onclick="generateServiceOrderPocket()">📑 Pochette complète</button></div>`;
+  html+=`<div class="service-order-actions"><button class="btn green" onclick="generateServiceOrderDay(${di})">📄 BCS journée complète</button><button class="btn purple" onclick="generateIcsDay(${di})">📆 ICS journée complète</button>${s.type==="WORK"?`<button class="btn primary" onclick="generateServiceOrderSingle(${ai},${di})">📄 BCS de cet agent</button><button class="btn purple" onclick="generateIcsSingle(${ai},${di})">👤 ICS de cet agent</button>`:""}<button class="btn purple" onclick="generateIcsAgent(${ai})">📆 ICS programmation complète agent</button><button class="btn green" onclick="generateServiceOrderPocket()">📑 Pochette BCS complète</button></div>`;
   if(missingToday.length){
     html+=`<div class="edit-title" style="color:var(--bad-t)">Journées à couvrir ce jour</div><div class="edit-grid">`;
     missingToday.forEach(js=>{
@@ -2824,6 +2825,216 @@ function generateServiceOrderSingle(ai,di){
   const item=getServiceOrderAssignments("single",ai,di)[0];
   if(!item){alert("Cette case ne contient pas de journée de service attribuée.");return;}
   generateServiceOrderPDF([item],`bulletin_commande_service_${String(item.agent.code||item.agent.shortName||item.agent.name||"agent").replace(/\s+/g,"_")}_${fmtShort(item.date).replace(/\//g,"-")}_${item.slot.code||"JS"}.pdf`);
+}
+
+
+/* === Export calendrier .ICS formateurs / élèves === */
+function icsPad(n){return String(n).padStart(2,"0");}
+function icsDateOnly(date){
+  const d=new Date(date);
+  return `${d.getFullYear()}${icsPad(d.getMonth()+1)}${icsPad(d.getDate())}`;
+}
+function icsDateTime(date,min){
+  const d=new Date(date);
+  const m=Number.isFinite(Number(min)) ? Number(min) : 8*60;
+  d.setHours(Math.floor(m/60),m%60,0,0);
+  return `${d.getFullYear()}${icsPad(d.getMonth()+1)}${icsPad(d.getDate())}T${icsPad(d.getHours())}${icsPad(d.getMinutes())}00`;
+}
+function icsEndDateOnly(date){
+  const d=new Date(date);
+  d.setDate(d.getDate()+1);
+  return icsDateOnly(d);
+}
+function icsEscape(v){
+  return String(v??"")
+    .replace(/\\/g,"\\\\")
+    .replace(/\r?\n/g,"\\n")
+    .replace(/;/g,"\\;")
+    .replace(/,/g,"\\,");
+}
+function icsFoldLine(line){
+  const out=[];
+  let s=String(line);
+  while(s.length>74){out.push(s.slice(0,74));s=" "+s.slice(74);}
+  out.push(s);
+  return out.join("\r\n");
+}
+function safeCalendarFilename(v){
+  return String(v||"calendrier").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/gi,"_").replace(/^_+|_+$/g,"").toLowerCase() || "calendrier";
+}
+function getTrainerDisplayForSlot(item){
+  if(!item) return "";
+  if(item.agent?.role!=="ELEVE") return "";
+  const slot=item.slot||{};
+  const direct=String(slot.trainerName||slot.formateur||slot.trainer||"").trim();
+  if(direct) return direct;
+  return getTrainerNameForServiceOrderItem(item);
+}
+function getStudentsForTrainerDay(trainer,di,slot){
+  if(!planning || !trainer) return [];
+  const trainerName=String(trainer.name||trainer.code||trainer.shortName||"").trim();
+  const code=String(slot?.code||slot?.sheet||"").trim();
+  return (planning.agents||[]).filter(a=>{
+    if(a.role!=="ELEVE") return false;
+    const s=a.days?.[di];
+    if(!s || s.type!=="WORK") return false;
+    const tn=String(s.trainerName||s.formateur||s.trainer||"").trim();
+    const sc=String(s.code||s.sheet||"").trim();
+    return (tn && tn===trainerName) || (code && sc===code && tn===trainerName);
+  }).map(a=>`${a.name}${a.formation?" ("+a.formation+")":""}`);
+}
+function calendarSlotLabel(slot){
+  if(!slot) return "Repos";
+  if(slot.type==="WORK") return `JS ${slot.code||""}`.trim();
+  if(slot.type==="DISPO") return "DISPO";
+  if(slot.type==="ASTREINTE") return "ASTREINTE";
+  if(slot.type==="CP") return "CP";
+  if(slot.type==="REST") return "Repos";
+  return slot.type||"Journée";
+}
+function calendarAssignments(mode, ai=null, di=null){
+  if(!planning) return [];
+  const items=[];
+  (planning.dates||[]).forEach((date,dateIndex)=>{
+    if(mode==="day" && dateIndex!==di) return;
+    (planning.agents||[]).forEach((agent,agentIndex)=>{
+      if(mode==="agent" && agentIndex!==ai) return;
+      if(mode==="single" && (agentIndex!==ai || dateIndex!==di)) return;
+      let slot=agent.days?.[dateIndex] || {type:"REST",code:"R",reason:"Repos"};
+      if(slot.type==="INACTIF") return;
+      items.push({agent,agentIndex,date,dateIndex,slot});
+    });
+  });
+  items.sort((a,b)=>a.date-b.date || a.agent.name.localeCompare(b.agent.name,"fr") || String(a.slot.code||"").localeCompare(String(b.slot.code||""),"fr",{numeric:true}));
+  return items;
+}
+function calendarDescription(item){
+  const agent=item.agent, slot=hydrateServiceSlot(item.slot||{}), di=item.dateIndex;
+  const lines=[];
+  lines.push(`Agent : ${agent.name}`);
+  lines.push(`Rôle : ${agent.role==="ELEVE"?"Élève":"Formateur"}`);
+  if(agent.formation) lines.push(`Formation : ${agent.formation}`);
+  lines.push(`Date : ${fmt(item.date)}`);
+  lines.push(`Journée : ${calendarSlotLabel(slot)}`);
+  if(slot.type==="WORK"){
+    lines.push(`PS : ${hhmm(slot.startMin)}`);
+    lines.push(`FS : ${hhmm(slot.endMin)}`);
+    lines.push(`Travail effectif : ${durH(slot.workMin||0)}`);
+    lines.push(`Tête de train : ${durH(trainHeadMinutes(slot))}`);
+    if(agent.role==="ELEVE"){
+      const trainer=getTrainerDisplayForSlot({...item,slot});
+      lines.push(`Formateur associé : ${trainer||"Non renseigné"}`);
+    }else{
+      const students=getStudentsForTrainerDay(agent,di,slot);
+      lines.push(`Élèves associés : ${students.length?students.join(", "):"Aucun élève associé"}`);
+    }
+    const trains=(slot.trains||[]).filter(Boolean);
+    if(trains.length) lines.push(`Trains : ${trains.join(", ")}`);
+    const rows=serviceOrderRows(slot);
+    if(rows.length){
+      lines.push("");
+      lines.push("Détail journée :");
+      rows.forEach(r=>{
+        const deb=[serviceOrderSafe(r.start),serviceOrderSafe(r.startPlace)].filter(Boolean).join(" ");
+        const fin=[serviceOrderSafe(r.end),serviceOrderSafe(r.endPlace)].filter(Boolean).join(" ");
+        const parts=[serviceOrderSafe(r.task), deb?`Début ${deb}`:"", fin?`Fin ${fin}`:"", serviceOrderSafe(r.train)?`Train ${serviceOrderSafe(r.train)}`:"", serviceOrderSafe(r.note)].filter(Boolean);
+        if(parts.length) lines.push(`- ${parts.join(" · ")}`);
+      });
+    }
+  }else if(slot.type==="DISPO"){
+    lines.push("Horaire : 10:00 - 15:00");
+    lines.push("Travail effectif : 5h00");
+  }else if(slot.type==="ASTREINTE"){
+    lines.push("Horaire : 08:00 - 16:00");
+    lines.push("Travail effectif : 8h00");
+  }else if(slot.type==="CP"){
+    lines.push(slot.reason||"Congé payé");
+  }else{
+    lines.push(slot.reason||"Repos");
+  }
+  return lines.join("\n");
+}
+function calendarSummary(item){
+  const a=item.agent, s=item.slot||{};
+  if(s.type==="WORK"){
+    if(a.role==="ELEVE"){
+      const trainer=getTrainerDisplayForSlot(item);
+      return `${a.name} · ${s.code||"JS"} · Élève${trainer?" avec "+trainer:""}`;
+    }
+    const students=getStudentsForTrainerDay(a,item.dateIndex,s);
+    return `${a.name} · ${s.code||"JS"}${students.length?" · "+students.length+" élève(s)":""}`;
+  }
+  return `${a.name} · ${calendarSlotLabel(s)}`;
+}
+function buildIcs(items,calendarName){
+  const stamp=new Date();
+  const dtstamp=`${stamp.getUTCFullYear()}${icsPad(stamp.getUTCMonth()+1)}${icsPad(stamp.getUTCDate())}T${icsPad(stamp.getUTCHours())}${icsPad(stamp.getUTCMinutes())}${icsPad(stamp.getUTCSeconds())}Z`;
+  const lines=[
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Programmation Caen//Export ICS//FR",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${icsEscape(calendarName||"Programmation Caen")}`
+  ];
+  items.forEach((item,idx)=>{
+    const s=item.slot||{};
+    const uid=`caen-${safeCalendarFilename(item.agent.name)}-${icsDateOnly(item.date)}-${safeCalendarFilename(s.code||s.type||"jour")}-${idx}@programmation-caen`;
+    lines.push("BEGIN:VEVENT");
+    lines.push(`UID:${uid}`);
+    lines.push(`DTSTAMP:${dtstamp}`);
+    lines.push(`SUMMARY:${icsEscape(calendarSummary(item))}`);
+    if(s.type==="WORK"){
+      lines.push(`DTSTART:${icsDateTime(item.date,s.startMin)}`);
+      lines.push(`DTEND:${icsDateTime(item.date,s.endMin)}`);
+    }else if(s.type==="DISPO"){
+      lines.push(`DTSTART:${icsDateTime(item.date,10*60)}`);
+      lines.push(`DTEND:${icsDateTime(item.date,15*60)}`);
+    }else if(s.type==="ASTREINTE"){
+      lines.push(`DTSTART:${icsDateTime(item.date,8*60)}`);
+      lines.push(`DTEND:${icsDateTime(item.date,16*60)}`);
+    }else{
+      lines.push(`DTSTART;VALUE=DATE:${icsDateOnly(item.date)}`);
+      lines.push(`DTEND;VALUE=DATE:${icsEndDateOnly(item.date)}`);
+    }
+    lines.push(`DESCRIPTION:${icsEscape(calendarDescription(item))}`);
+    lines.push(`CATEGORIES:${icsEscape(item.agent.role==="ELEVE"?"Élève":"Formateur")}`);
+    lines.push("END:VEVENT");
+  });
+  lines.push("END:VCALENDAR");
+  return lines.map(icsFoldLine).join("\r\n");
+}
+function downloadIcs(items,filename,calendarName){
+  if(!hasUnlockedProgrammingData()){alert("Export ICS verrouillé : ouvre d'abord une sauvegarde .pcprog ou restaure une programmation via l’auto-save navigateur.");return;}
+  if(!items.length){alert("Aucune journée à exporter dans le calendrier.");return;}
+  const blob=new Blob([buildIcs(items,calendarName)],{type:"text/calendar;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
+  setState("ICS généré",`${items.length} événement(s) calendrier exporté(s).`);
+}
+function generateIcsAllPlanning(){
+  const items=calendarAssignments("all");
+  downloadIcs(items,"programmation_complete_caen.ics","Programmation complète Caen");
+}
+function generateIcsAgent(ai){
+  const agent=planning?.agents?.[ai];
+  if(!agent){alert("Agent introuvable.");return;}
+  const items=calendarAssignments("agent",ai);
+  downloadIcs(items,`calendrier_${safeCalendarFilename(agent.name)}.ics`,`Programmation ${agent.name}`);
+}
+function generateIcsDay(di){
+  const d=planning?.dates?.[di];
+  const items=calendarAssignments("day",null,di);
+  downloadIcs(items,`calendrier_jour_${d?fmtShort(d).replace(/\//g,"-"):"jour"}.ics`,`Programmation du ${d?fmt(d):"jour"}`);
+}
+function generateIcsSingle(ai,di){
+  const item=calendarAssignments("single",ai,di)[0];
+  if(!item){alert("Cette case ne contient aucune journée exportable.");return;}
+  downloadIcs([item],`calendrier_${safeCalendarFilename(item.agent.name)}_${fmtShort(item.date).replace(/\//g,"-")}.ics`,`Journée ${item.agent.name} ${fmt(item.date)}`);
 }
 
 window.addEventListener("load",()=>{loadExtraAgents(); restoreEmbedded(); loadAutoPlanning(); autosaveReady=true;});
