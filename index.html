@@ -183,6 +183,20 @@ body.dark .trainee-pill.f1{color:#bfdbfe} body.dark .trainee-pill.f2{color:#bbf7
 body.dark .plan tr.trainee-row td.agent{background:#0b1220!important}
 body.dark .edit-grid,body.dark .manual-box,body.dark .detail-box,body.dark .service-order-actions{background:#0b1220!important}
 
+
+
+/* === V06.25 : mode plein écran pour la matrice de programmation === */
+.fullscreen-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn.fullscreen-btn{min-height:38px;padding:8px 12px;font-size:12px;border-radius:999px;background:linear-gradient(135deg,#0f172a,#334155)!important;color:#fff!important}
+body.dark .btn.fullscreen-btn{background:linear-gradient(135deg,#2563eb,#06b6d4)!important}
+body.matrix-fullscreen{overflow:hidden}
+body.matrix-fullscreen #planningCard{position:fixed!important;inset:10px!important;z-index:95!important;margin:0!important;padding:14px!important;border-radius:18px!important;background:var(--solid)!important;box-shadow:0 30px 100px rgba(0,0,0,.45)!important;display:flex!important;flex-direction:column!important}
+body.matrix-fullscreen #planningCard .section-title{position:sticky;top:0;z-index:30;background:var(--solid);padding:6px 4px 12px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+body.matrix-fullscreen #planningCard .planning-wrap{flex:1!important;max-height:none!important;height:calc(100vh - 115px)!important;border-radius:14px}
+body.matrix-fullscreen header,body.matrix-fullscreen main>section:not(#planningCard){display:none!important}
+body.matrix-fullscreen #planningCard .hint{max-width:680px}
+@media(max-width:680px){body.matrix-fullscreen #planningCard{inset:4px!important;border-radius:12px!important;padding:8px!important}body.matrix-fullscreen #planningCard .section-title{align-items:flex-start;flex-direction:column}.btn.fullscreen-btn{width:100%}}
+
 </style>
 </head>
 <body>
@@ -245,7 +259,10 @@ body.dark .edit-grid,body.dark .manual-box,body.dark .detail-box,body.dark .serv
   </section>
 
   <section class="card" id="planningCard">
-    <div class="section-title"><h2>4. Matrice de programmation complète</h2><span class="hint">Clique sur une cellule pour la consulter ou la modifier manuellement (Repos, DISPO, CP, JS, ou forcer)</span></div>
+    <div class="section-title">
+      <div><h2>4. Matrice de programmation complète</h2><span class="hint">Clique sur une cellule pour la consulter ou la modifier manuellement (Repos, DISPO, CP, JS, ou forcer)</span></div>
+      <div class="fullscreen-actions"><button class="btn fullscreen-btn" id="matrixFullscreenBtn" onclick="toggleMatrixFullscreen()">⛶ Plein écran matrice</button></div>
+    </div>
     <div class="planning-wrap"><table class="plan"><thead><tr id="planningHead"></tr></thead><tbody id="planningBody"></tbody></table></div>
   </section>
 
@@ -2277,6 +2294,42 @@ function setManual(ai,di,type,code){
   closeModal();
   setState("Modifié",`Journée ${fmt(planning.dates[di])} de ${a.name} modifiée manuellement.`);
 }
+
+
+function isMatrixFullscreen(){
+  return document.body.classList.contains('matrix-fullscreen');
+}
+function updateMatrixFullscreenButton(){
+  const btn=document.getElementById('matrixFullscreenBtn');
+  if(!btn) return;
+  btn.textContent=isMatrixFullscreen()?'✕ Quitter le plein écran':'⛶ Plein écran matrice';
+}
+async function toggleMatrixFullscreen(){
+  const card=document.getElementById('planningCard');
+  if(!card) return;
+  const entering=!isMatrixFullscreen();
+  document.body.classList.toggle('matrix-fullscreen',entering);
+  updateMatrixFullscreenButton();
+  try{
+    if(entering && card.requestFullscreen){ await card.requestFullscreen(); }
+    else if(!entering && document.fullscreenElement && document.exitFullscreen){ await document.exitFullscreen(); }
+  }catch(e){
+    // Le mode CSS reste actif si le navigateur bloque le plein écran natif.
+  }
+}
+document.addEventListener('fullscreenchange',()=>{
+  if(!document.fullscreenElement && isMatrixFullscreen()){
+    document.body.classList.remove('matrix-fullscreen');
+    updateMatrixFullscreenButton();
+  }
+});
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape' && isMatrixFullscreen()){
+    document.body.classList.remove('matrix-fullscreen');
+    updateMatrixFullscreenButton();
+  }
+});
+
 function closeModal(){document.getElementById("detailModal").classList.remove("open")}
 function openHelp(){
   document.getElementById("modalTitle").textContent="Aide";
