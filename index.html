@@ -197,12 +197,19 @@ body.matrix-fullscreen header,body.matrix-fullscreen main>section:not(#planningC
 body.matrix-fullscreen #planningCard .hint{max-width:680px}
 @media(max-width:680px){body.matrix-fullscreen #planningCard{inset:4px!important;border-radius:12px!important;padding:8px!important}body.matrix-fullscreen #planningCard .section-title{align-items:flex-start;flex-direction:column}.btn.fullscreen-btn{width:100%}}
 
+/* === V06.26 : exports PDF ciblés + journée SIMU === */
+.export-filter{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px;margin:12px 0}
+.export-filter select,.export-filter input{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--solid);color:var(--ink);font-weight:800}
+.simu{background:linear-gradient(145deg,#fef3c7,rgba(251,146,60,.22));color:#9a3412;border:2px dashed #f97316}.simu:after{background:#f97316}
+.manual-action.dual{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manual-action .simu-btn{background:linear-gradient(135deg,#d97706,#f97316)}
+@media(max-width:680px){.export-filter{grid-template-columns:1fr}.manual-action.dual{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.24 libellés ICS clarifiés formateurs/élèves · affectations stagiaires manuelles corrigées · calcul JS corrigé · suivi 35h</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir des journées de service Excel V10_09 · V06.26 PDF global corrigé · PDF agent/période · SIMU · libellés ICS clarifiés formateurs/élèves · affectations stagiaires manuelles corrigées · calcul JS corrigé · suivi 35h</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -232,7 +239,8 @@ body.matrix-fullscreen #planningCard .hint{max-width:680px}
       <button class="btn primary" id="btnGeneratePlanning" onclick="generatePlanning()" disabled>🔒 Génération verrouillée</button>
       <button class="btn purple" id="btnRecalculatePlanning" onclick="recalculateDifferent()" disabled>🔄 Recalcul verrouillé</button>
       <button class="btn green" onclick="exportExcel()">📥 Export Excel</button>
-      <button class="btn red" onclick="exportPDF()">📄 Export PDF</button>
+      <button class="btn red" onclick="exportPDF()">📄 Export PDF global</button>
+      <button class="btn purple" onclick="openAgentDatePdfExport()">👤 PDF agent / dates</button>
       <button class="btn green" onclick="generateServiceOrderPocket()">📑 Pochette BCS complète</button>
       <button class="btn purple" onclick="generateIcsAllPlanning()">📆 ICS toute la programmation</button>
       <button class="btn orange" onclick="restoreEmbedded()">↩ Relire l’Excel intégré</button>
@@ -1984,7 +1992,7 @@ function renderPlanning(){
       }
       if(s.type==="WORK" && a.role==="ELEVE" && s.trainerName){title+=` · Élève ${a.formation||""} avec ${s.trainerName} · ${weeklyWorkLabel(a,di)}`;}
       if(s.type==="CP"){cls="cp";code="CP";h="-";title="Congé payé"+(s.reason?" · "+s.reason:"")}
-      if(s.type==="WORK"){cls=s.forced?"bad":"work"; if(a.role==="ELEVE") cls+=(" trainee-work "+String(a.formation||s.formation||"").toLowerCase()); code=s.code;h=durH(s.workMin);ex=a.role==="ELEVE"?(s.trainerName?`avec ${s.trainerName}`:"élève"):(s.trains?.length?`${s.trains.length} train(s)`:"");title=`${s.code} · ${familyLabel(serviceFamily(s))} · PS ${hhmm(s.startMin)} · FS ${hhmm(s.endMin)} · ${h}${s.forced?" · "+s.reason:""}`}
+      if(s.type==="WORK"){cls=s.forced?"bad":(s.code==="SIMU"?"simu":"work"); if(a.role==="ELEVE") cls+=(" trainee-work "+String(a.formation||s.formation||"").toLowerCase()); code=s.code;h=durH(s.workMin);ex=a.role==="ELEVE"?(s.trainerName?`avec ${s.trainerName}`:"élève"):(s.trains?.length?`${s.trains.length} train(s)`:"");title=`${s.code} · ${familyLabel(serviceFamily(s))} · PS ${hhmm(s.startMin)} · FS ${hhmm(s.endMin)} · ${h}${s.forced?" · "+s.reason:""}`}
       return `<td class="slot"><div class="tile ${cls}" title="${escapeHtml(title)}" onclick="openDetail(${ai},${di})">${formationBadgeHtml(planning.dates[di],s,a)}<div class="code">${code}</div>${serviceTypeHtml(s)}<div class="hours">${h}</div>${ex?`<div class="extra">${ex}</div>`:""}</div></td>`
     }).join("");
     const roleLine=a.role==="ELEVE" ? `🎓 Élève ${a.formation||""} · ${a.workDays} conduite · ⚠️35h ${a.weeklyWarnings?.length||0} · formateurs ${Object.entries(a.trainerCounts||{}).filter(x=>x[1]).map(([k,v])=>`${k}:${v}`).join(' · ')||'—'}` : `📅 ${a.workDays}JS ${a.dispoDays}D ${a.cpDays}CP · 🟧${a.astreinteDays||0}AST · 🎓${a.studentDays||0} élève-jour · ⚠️${a.forced.length}`;
@@ -2159,7 +2167,7 @@ function openDetail(ai,di){
     <div><label>FS</label><input id="manualFS" placeholder="ex : 16:00"></div>
     <div><label>Travail effectif</label><input id="manualWork" placeholder="optionnel ex : 7:30"></div>
     <div><label>Trains</label><input id="manualTrains" placeholder="ex : 852001, 852002"></div>
-    <div class="manual-action"><button onclick="createManualJS(${ai},${di})">Créer et affecter</button></div>
+    <div class="manual-action dual"><button onclick="createManualJS(${ai},${di})">Créer la JS</button><button class="simu-btn" onclick="createManualJS(${ai},${di},'SIMU')">SIMU</button></div>
   </div>
   <div class="hint" style="margin:-6px 0 14px">La journée créée est ajoutée au besoin du jour. Si tu la retires ensuite, elle apparaîtra automatiquement en journée à couvrir.</div>`;
 
@@ -2198,18 +2206,19 @@ function parseManualDuration(v){
   if(m) return Math.round(parseFloat(m[1])*60);
   return null;
 }
-function createManualJS(ai,di){
+function createManualJS(ai,di,forcedCode=""){
   if(!planning || !planning.agents?.[ai] || !planning.dates?.[di]) return;
   const a=planning.agents[ai];
   const d=planning.dates[di];
   if(isWeekend(d)){alert("Impossible de créer une journée sur un samedi/dimanche : repos imposé pour tous.");return;}
-  const code=(document.getElementById("manualCode")?.value||"").trim().toUpperCase();
+  const code=(forcedCode || document.getElementById("manualCode")?.value || "").trim().toUpperCase();
   const ps=minOfTime(document.getElementById("manualPS")?.value||"");
   const fs=minOfTime(document.getElementById("manualFS")?.value||"");
   const workInput=document.getElementById("manualWork")?.value||"";
   const workParsed=parseManualDuration(workInput);
   const trains=(document.getElementById("manualTrains")?.value||"").split(/[;,\s]+/).map(x=>x.trim()).filter(Boolean);
   if(!code){alert("Indique un nom ou un code de journée.");return;}
+  if(code==="SIMU" && a.role==="ELEVE"){ /* autorisé : journée de simulation pédagogique */ }
   if(ps==null || fs==null){alert("Indique une PS et une FS au format 08:00 ou 8h00.");return;}
   const amplitude=fs>=ps ? fs-ps : fs+1440-ps;
   const workMin=workParsed!=null ? workParsed : amplitude;
@@ -2224,7 +2233,8 @@ function createManualJS(ai,di){
     regimeText:"Créée manuellement le "+fmtShort(d),
     dates:[new Date(d)],
     trains,
-    manualCreated:true
+    manualCreated:true,
+    isSimu:code==="SIMU"
   };
   const old=a.days[di];
   a.days[di]=null;
@@ -2418,215 +2428,104 @@ function exportExcel(){
   XLSX.writeFile(wb,"planning_caen_js_excel.xlsx");
   setState("Excel généré","Export Excel amélioré avec couleurs, cellules détaillées et récapitulatif.");
 }
-function exportPDF(){
-  if(!hasUnlockedProgrammingData()){alert("Ouvre d’abord une sauvegarde .pcprog ou restaure une programmation via l’auto-save navigateur avant d’exporter le PDF.");return}
-  if(!window.jspdf || !window.jspdf.jsPDF){
-    alert("Le module PDF n'est pas chargé. Vérifie ta connexion internet au premier chargement de la page, puis réessaie.");
-    return;
-  }
 
-  try{
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({orientation:"landscape", unit:"mm", format:"a4", compress:true});
-
-    const days = planning.dates || [];
-    const agents = planning.agents || [];
-    const maxCols = 9; // volontairement limité pour rester lisible
-    const margin = 7;
-    const pageW = 297;
-    const pageH = 210;
-    const agentW = 42;
-    const rowH = 21;
-    const headH = 18;
-    const topY = 27;
-    const tableW = pageW - margin*2;
-    const dayW = (tableW - agentW) / maxCols;
-
-    const safe = v => String(v ?? "");
-    const dayName = d => ["dim.","lun.","mar.","mer.","jeu.","ven.","sam."][d.getDay()];
-    const shortDate = d => `${dayName(d)} ${pad(d.getDate())}/${pad(d.getMonth()+1)}`;
-    const clean = s => safe(s).replace(/[\r\n]+/g," ").trim();
-
-    function coverage(di){
-      const c = getDayCoverage(di);
-      return {covered:c.covered, total:c.required, label:c.label, cls:c.cls};
-    }
-
-    function slotLabel(slot){
-      if(!slot || slot.type==="REST") return ["R", "Repos", ""];
-      if(slot.type==="DISPO") return ["DISPO", "Disponible", ""];
-      if(slot.type==="ASTREINTE") return ["AST", "Astreinte", "8h00 · journée"];
-      if(slot.type==="CP") return ["CP", "Congés", ""];
-      const enriched = hydrateServiceSlot(slot);
-      const code = clean(enriched.code || enriched.type || "");
-      const h = enriched.type==="WORK" ? `${hhmm(enriched.startMin)} → ${hhmm(enriched.endMin)} · ${durH(enriched.workMin||0)}` : "";
-      const trains = (enriched.trains||[]).slice(0,3).join(" · ");
-      const trainInfo = trains ? `Trains ${trains}${(enriched.trains||[]).length>3?"…":""}` : `${serviceFamily(enriched)} · Tête ${durH(trainHeadMinutes(enriched))}`;
-      const alert = clean(enriched.reason || (enriched.manual ? "Manuel" : "") || (enriched.forced || enriched.bad ? "Alerte" : ""));
-      const note = [trainInfo, alert].filter(Boolean).join(" · ");
-      return [code, h, note];
-    }
-
-    function fillFor(slot){
-      if(!slot || slot.type==="REST") return [220,252,231];
-      if(slot.type==="DISPO") return [254,243,199];
-      if(slot.type==="ASTREINTE") return [255,237,213];
-      if(slot.type==="CP") return [243,232,255];
-      if(slot.forced || slot.bad || (slot.reason && String(slot.reason).toLowerCase().includes("repos"))) return [254,226,226];
-      return [219,234,254];
-    }
-
-    function textColorFor(slot){
-      if(!slot || slot.type==="REST") return [4,120,87];
-      if(slot.type==="DISPO") return [146,64,14];
-      if(slot.type==="ASTREINTE") return [154,52,18];
-      if(slot.type==="CP") return [107,33,168];
-      if(slot.forced || slot.bad || (slot.reason && String(slot.reason).toLowerCase().includes("repos"))) return [153,27,27];
-      return [30,58,138];
-    }
-
-    function drawHeader(pageNo, totalPages, startIdx, endIdx){
-      doc.setFillColor(255,255,255);
-      doc.rect(0,0,pageW,pageH,"F");
-      doc.setDrawColor(0,0,128);
-      doc.setLineWidth(0.45);
-      doc.roundedRect(margin, 6, tableW, 15, 2, 2, "D");
-      doc.setTextColor(0,0,128);
-      doc.setFont("helvetica","bold");
-      doc.setFontSize(13);
-      doc.text("Programmation Caen — planning ADC", margin+4, 15);
-      doc.setFont("helvetica","normal");
-      doc.setFontSize(8);
-      const period = days.length ? `${fmtShort(days[0])} au ${fmtShort(days[days.length-1])}` : "-";
-      doc.text(`Période : ${period}  |  Colonnes ${startIdx+1}-${endIdx}  |  Page ${pageNo}/${totalPages}`, pageW-margin-4, 12, {align:"right"});
-      doc.text("Export PDF vectoriel lisible — détails Excel inclus", pageW-margin-4, 17, {align:"right"});
-    }
-
-    function drawPlanningPage(chunk, pageNo, totalPages){
-      drawHeader(pageNo,totalPages,chunk.start,chunk.end);
-      let y = topY;
-      doc.setDrawColor(203,213,225);
-      doc.setLineWidth(0.2);
-      doc.setFillColor(226,232,240);
-      doc.rect(margin, y, agentW, headH, "FD");
-      doc.setTextColor(15,23,42);
-      doc.setFont("helvetica","bold");
-      doc.setFontSize(9);
-      doc.text("Agent", margin+2, y+10);
-      for(let di=chunk.start; di<chunk.end; di++){
-        const x = margin + agentW + (di - chunk.start) * dayW;
-        const cov = coverage(di);
-        doc.setFillColor(cov.total===0 ? 241 : (cov.covered<cov.total ? 254 : 220), cov.total===0 ? 245 : (cov.covered<cov.total ? 226 : 252), cov.total===0 ? 249 : (cov.covered<cov.total ? 226 : 231));
-        doc.rect(x, y, dayW, headH, "FD");
-        doc.setTextColor(15,23,42);
-        doc.setFont("helvetica","bold");
-        doc.setFontSize(8);
-        doc.text(`J${di+1}`, x+dayW/2, y+5, {align:"center"});
-        doc.setFont("helvetica","normal");
-        doc.setFontSize(7);
-        doc.text(shortDate(days[di]), x+dayW/2, y+10, {align:"center"});
-        doc.setFont("helvetica","bold");
-        doc.text(cov.label || `${cov.covered}/${cov.total}`, x+dayW/2, y+15, {align:"center"});
-      }
-      y += headH;
-
-      agents.forEach(a=>{
-        doc.setFillColor(248,250,252);
-        doc.rect(margin, y, agentW, rowH, "FD");
-        doc.setTextColor(15,23,42);
-        doc.setFont("helvetica","bold");
-        doc.setFontSize(8);
-        doc.text(clean(a.name), margin+2, y+6);
-        doc.setFont("helvetica","normal");
-        doc.setFontSize(6.5);
-        doc.setTextColor(71,85,105);
-        doc.text(`${durH(a.totalWorkMin)} · ${a.workDays} JS`, margin+2, y+12);
-        doc.text(`${a.dispoDays} DISPO · ${a.astreinteDays||0} AST · ${a.forced.length} alerte(s)`, margin+2, y+17);
-
-        for(let di=chunk.start; di<chunk.end; di++){
-          const slot = a.days[di] || {type:"REST",code:"R"};
-          const x = margin + agentW + (di - chunk.start) * dayW;
-          const [r,g,b] = fillFor(slot);
-          const [tr,tg,tb] = textColorFor(slot);
-          doc.setFillColor(r,g,b);
-          doc.setDrawColor(203,213,225);
-          doc.rect(x, y, dayW, rowH, "FD");
-          const [code, h, note] = slotLabel(slot);
-          doc.setTextColor(tr,tg,tb);
-          doc.setFont("helvetica","bold");
-          doc.setFontSize(code.length > 6 ? 7.5 : 9);
-          doc.text(code, x+dayW/2, y+7, {align:"center", maxWidth:dayW-2});
-          doc.setFont("helvetica","normal");
-          doc.setFontSize(6.3);
-          if(h) doc.text(h, x+dayW/2, y+12.5, {align:"center", maxWidth:dayW-2});
-          if(note){
-            doc.setFont("helvetica","bold");
-            doc.setFontSize(5.5);
-            const lines = doc.splitTextToSize(note, dayW-2).slice(0,2);
-            doc.text(lines, x+dayW/2, y+17, {align:"center"});
-          }
-        }
-        y += rowH;
-      });
-
-      doc.setTextColor(71,85,105);
-      doc.setFont("helvetica","normal");
-      doc.setFontSize(7);
-      doc.text("Couleurs : bleu = travail · vert = repos · jaune = DISPO · violet = CP · rouge = alerte / repos insuffisant / non couvert", margin, pageH-6);
-    }
-
-    const chunks=[];
-    for(let i=0;i<days.length;i+=maxCols) chunks.push({start:i,end:Math.min(i+maxCols,days.length)});
-    const totalPages = chunks.length + 1;
-    chunks.forEach((chunk, idx)=>{
-      if(idx>0) doc.addPage("a4","landscape");
-      drawPlanningPage(chunk, idx+1, totalPages);
-    });
-
-    doc.addPage("a4","landscape");
-    drawHeader(totalPages,totalPages,0,days.length);
-    doc.setTextColor(15,23,42);
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(12);
-    doc.text("Récapitulatif", margin, 32);
-    let y=40;
-    agents.forEach(a=>{
-      doc.setFillColor(248,250,252);
-      doc.setDrawColor(203,213,225);
-      doc.roundedRect(margin, y, 52, 20, 2, 2, "FD");
-      doc.setTextColor(15,23,42);
-      doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.text(clean(a.name), margin+3, y+6);
-      doc.setFont("helvetica","normal"); doc.setFontSize(7); doc.setTextColor(71,85,105);
-      doc.text(`${durH(a.totalWorkMin)} · ${a.workDays} JS`, margin+3, y+12);
-      doc.text(`${a.dispoDays} DISPO · ${a.astreinteDays||0} AST · ${a.forced.length} alerte(s)`, margin+3, y+17);
-      y += 23;
-    });
-
-    const unc = planning.uncovered || [];
-    let x2 = 75;
-    doc.setTextColor(153,27,27);
-    doc.setFont("helvetica","bold"); doc.setFontSize(11);
-    doc.text(`Journées non couvertes : ${unc.length}`, x2, 40);
-    doc.setTextColor(15,23,42);
-    doc.setFont("helvetica","normal"); doc.setFontSize(7);
-    let uy=48;
-    if(!unc.length){ doc.text("Aucune journée non couverte.", x2, uy); }
-    unc.slice(0,85).forEach(u=>{
-      if(uy > pageH-10){ doc.addPage("a4","landscape"); uy=15; }
-      const line = `${fmt(u.date)} — ${(u.js && u.js.code) || u.code || "JS"} — ${u.reason || "Non couverte"}`;
-      doc.text(clean(line), x2, uy, {maxWidth:210});
-      uy += 4;
-    });
-    if(unc.length>85) doc.text(`+ ${unc.length-85} autre(s) journée(s) non affichée(s).`, x2, uy+4);
-
-    doc.save("planning_caen_js_excel.pdf");
-    setState("PDF généré", "Le fichier PDF a été téléchargé.");
-  }catch(e){
-    console.error(e);
-    alert("Impossible de générer le PDF : " + (e && e.message ? e.message : e));
-  }
+function openAgentDatePdfExport(){
+  if(!hasUnlockedProgrammingData()){alert("Ouvre d’abord une sauvegarde .pcprog avant d’exporter.");return;}
+  const options=(planning.agents||[]).map((a,i)=>`<option value="${i}">${escapeHtml(a.name)}${a.role==="ELEVE"?" · Élève "+(a.formation||""):" · Formateur"}</option>`).join("");
+  const first=planning.dates?.[0]?dateKey(planning.dates[0]):"";
+  const last=planning.dates?.length?dateKey(planning.dates[planning.dates.length-1]):"";
+  document.getElementById("modalTitle").textContent="Export PDF par agent et période";
+  document.getElementById("modalSub").textContent="Même présentation en cases que la matrice de programmation";
+  document.getElementById("modalBody").innerHTML=`
+    <div class="export-filter">
+      <div class="field"><label>Agent</label><select id="pdfAgentSelect">${options}</select></div>
+      <div class="field"><label>Date de début</label><input type="date" id="pdfAgentStart" value="${first}" min="${first}" max="${last}"></div>
+      <div class="field"><label>Date de fin</label><input type="date" id="pdfAgentEnd" value="${last}" min="${first}" max="${last}"></div>
+    </div>
+    <div class="hint" style="margin-bottom:14px">Tu peux choisir une seule date en mettant la même date dans les deux champs.</div>
+    <button class="btn red" onclick="exportAgentDatePDF()">📄 Générer le PDF</button>`;
+  document.getElementById("detailModal").classList.add("open");
 }
 
+function pdfSlotColors(slot){
+  if(!slot || slot.type==="REST") return {fill:[220,252,231],text:[4,120,87]};
+  if(slot.type==="DISPO") return {fill:[254,243,199],text:[146,64,14]};
+  if(slot.type==="ASTREINTE") return {fill:[255,237,213],text:[154,52,18]};
+  if(slot.type==="CP") return {fill:[243,232,255],text:[107,33,168]};
+  if(slot.code==="SIMU") return {fill:[255,237,213],text:[154,52,18]};
+  if(slot.forced || slot.bad) return {fill:[254,226,226],text:[153,27,27]};
+  return {fill:[219,234,254],text:[30,58,138]};
+}
+function pdfSlotLines(slot){
+  if(!slot || slot.type==="REST") return ["R","Repos",""];
+  if(slot.type==="DISPO") return ["DISPO","10:00 → 15:00","5h00"];
+  if(slot.type==="ASTREINTE") return ["AST","Astreinte","8h00"];
+  if(slot.type==="CP") return ["CP","Congé payé",""];
+  const e=hydrateServiceSlot(slot);
+  return [String(e.code||"JS"),`${hhmm(e.startMin)} → ${hhmm(e.endMin)}`,`Travail ${durH(e.workMin||0)} · TT ${durH(trainHeadMinutes(e))}`];
+}
+function exportAgentDatePDF(){
+  if(!window.jspdf?.jsPDF){alert("Le module PDF n'est pas chargé.");return;}
+  const ai=Number(document.getElementById("pdfAgentSelect")?.value);
+  const start=document.getElementById("pdfAgentStart")?.value;
+  const end=document.getElementById("pdfAgentEnd")?.value;
+  const agent=planning.agents?.[ai];
+  if(!agent || !start || !end){alert("Sélectionne un agent et les dates.");return;}
+  if(start>end){alert("La date de début doit être antérieure à la date de fin.");return;}
+  const indices=(planning.dates||[]).map((d,i)=>({d,i,k:dateKey(d)})).filter(x=>x.k>=start&&x.k<=end);
+  if(!indices.length){alert("Aucune date du planning dans cette période.");return;}
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4",compress:true});
+  const margin=8,pageW=297,pageH=210,agentW=48,topY=31,headH=18,rowH=28,maxCols=7;
+  const usable=pageW-margin*2-agentW;
+  const chunks=[]; for(let i=0;i<indices.length;i+=maxCols) chunks.push(indices.slice(i,i+maxCols));
+  chunks.forEach((chunk,pi)=>{
+    if(pi) doc.addPage("a4","landscape");
+    doc.setFillColor(255,255,255);doc.rect(0,0,pageW,pageH,"F");
+    doc.setDrawColor(0,0,128);doc.roundedRect(margin,6,pageW-margin*2,17,2,2,"D");
+    doc.setTextColor(0,0,128);doc.setFont("helvetica","bold");doc.setFontSize(13);doc.text(`Planning de ${agent.name}`,margin+4,14);
+    doc.setFont("helvetica","normal");doc.setFontSize(8);doc.text(`${fmtShort(chunk[0].d)} au ${fmtShort(chunk[chunk.length-1].d)} · page ${pi+1}/${chunks.length}`,pageW-margin-4,14,{align:"right"});
+    const dayW=usable/chunk.length; let y=topY;
+    doc.setFillColor(226,232,240);doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.rect(margin,y,agentW,headH,"FD");doc.text("AGENT",margin+3,y+10);
+    chunk.forEach((x,j)=>{const xx=margin+agentW+j*dayW;const cov=getDayCoverage(x.i);doc.setFillColor(cov.total===0?241:(cov.covered<cov.total?254:220),cov.total===0?245:(cov.covered<cov.total?226:252),cov.total===0?249:(cov.covered<cov.total?226:231));doc.rect(xx,y,dayW,headH,"FD");doc.setTextColor(15,23,42);doc.setFontSize(8);doc.text(`J${x.i+1}`,xx+dayW/2,y+5,{align:"center"});doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text(fmtShort(x.d),xx+dayW/2,y+10,{align:"center"});doc.setFont("helvetica","bold");doc.text(cov.label,xx+dayW/2,y+15,{align:"center"});});
+    y+=headH;doc.setFillColor(248,250,252);doc.rect(margin,y,agentW,rowH,"FD");doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.setFontSize(9);doc.text(agent.name,margin+3,y+7,{maxWidth:agentW-5});doc.setFont("helvetica","normal");doc.setFontSize(7);doc.setTextColor(71,85,105);doc.text(agent.role==="ELEVE"?`Élève ${agent.formation||""}`:"Formateur",margin+3,y+14);doc.text(`${durH(agent.totalWorkMin)} · ${agent.workDays} JS`,margin+3,y+20);doc.text(`TT ${durH(agent.trainHeadMin||0)}`,margin+3,y+25);
+    chunk.forEach((x,j)=>{const slot=agent.days?.[x.i]||{type:"REST",code:"R"};const xx=margin+agentW+j*dayW;const c=pdfSlotColors(slot);doc.setFillColor(...c.fill);doc.setDrawColor(203,213,225);doc.rect(xx,y,dayW,rowH,"FD");const lines=pdfSlotLines(slot);doc.setTextColor(...c.text);doc.setFont("helvetica","bold");doc.setFontSize(lines[0].length>8?8:11);doc.text(lines[0],xx+dayW/2,y+8,{align:"center",maxWidth:dayW-3});doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text(lines[1],xx+dayW/2,y+16,{align:"center",maxWidth:dayW-3});doc.setFont("helvetica","bold");doc.setFontSize(6.5);doc.text(doc.splitTextToSize(lines[2],dayW-4).slice(0,2),xx+dayW/2,y+22,{align:"center"});});
+    doc.setTextColor(71,85,105);doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text("Vue identique à la matrice : une case par journée avec code, horaires, travail et tête de train.",margin,pageH-7);
+  });
+  const safeName=String(agent.name).normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"");
+  doc.save(`planning_${safeName}_${start}_${end}.pdf`);closeModal();setState("PDF agent généré",`${agent.name} · ${start} au ${end}`);
+}
+
+function exportPDF(){
+  if(!hasUnlockedProgrammingData()){alert("Ouvre d’abord une sauvegarde .pcprog ou restaure une programmation via l’auto-save navigateur avant d’exporter le PDF.");return;}
+  if(!window.jspdf?.jsPDF){alert("Le module PDF n'est pas chargé. Vérifie ta connexion internet au premier chargement de la page, puis réessaie.");return;}
+  try{
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4",compress:true});
+    const days=planning.dates||[], agents=planning.agents||[];
+    if(!days.length || !agents.length){alert("Aucune programmation à exporter.");return;}
+    const margin=7,pageW=297,pageH=210,agentW=43,topY=27,headH=18,rowH=21;
+    const maxDayCols=8, maxAgentRows=7;
+    const dayChunks=[];for(let i=0;i<days.length;i+=maxDayCols)dayChunks.push({start:i,end:Math.min(i+maxDayCols,days.length)});
+    const agentChunks=[];for(let i=0;i<agents.length;i+=maxAgentRows)agentChunks.push({start:i,end:Math.min(i+maxAgentRows,agents.length)});
+    const pages=[];dayChunks.forEach(dc=>agentChunks.forEach(ac=>pages.push({dc,ac})));
+    const clean=v=>String(v??"").replace(/[\r\n]+/g," ").trim();
+    pages.forEach((pg,pi)=>{
+      if(pi)doc.addPage("a4","landscape");
+      doc.setFillColor(255,255,255);doc.rect(0,0,pageW,pageH,"F");doc.setDrawColor(0,0,128);doc.setLineWidth(.45);doc.roundedRect(margin,6,pageW-margin*2,15,2,2,"D");
+      doc.setTextColor(0,0,128);doc.setFont("helvetica","bold");doc.setFontSize(13);doc.text("Programmation Caen — planning complet",margin+4,15);
+      doc.setFont("helvetica","normal");doc.setFontSize(8);doc.text(`${fmtShort(days[0])} au ${fmtShort(days[days.length-1])} · page ${pi+1}/${pages.length}`,pageW-margin-4,12,{align:"right"});doc.text(`Agents ${pg.ac.start+1}-${pg.ac.end} · jours ${pg.dc.start+1}-${pg.dc.end}`,pageW-margin-4,17,{align:"right"});
+      const count=pg.dc.end-pg.dc.start,dayW=(pageW-margin*2-agentW)/count;let y=topY;
+      doc.setDrawColor(203,213,225);doc.setFillColor(226,232,240);doc.rect(margin,y,agentW,headH,"FD");doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.setFontSize(9);doc.text("AGENT",margin+2,y+10);
+      for(let di=pg.dc.start;di<pg.dc.end;di++){const x=margin+agentW+(di-pg.dc.start)*dayW,c=getDayCoverage(di);doc.setFillColor(c.total===0?241:(c.covered<c.total?254:220),c.total===0?245:(c.covered<c.total?226:252),c.total===0?249:(c.covered<c.total?226:231));doc.rect(x,y,dayW,headH,"FD");doc.setTextColor(15,23,42);doc.setFontSize(8);doc.text(`J${di+1}`,x+dayW/2,y+5,{align:"center"});doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text(fmtShort(days[di]),x+dayW/2,y+10,{align:"center"});doc.setFont("helvetica","bold");doc.text(c.label,x+dayW/2,y+15,{align:"center"});}
+      y+=headH;
+      for(let ai=pg.ac.start;ai<pg.ac.end;ai++){const a=agents[ai];doc.setFillColor(248,250,252);doc.rect(margin,y,agentW,rowH,"FD");doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.setFontSize(8);doc.text(clean(a.name),margin+2,y+6,{maxWidth:agentW-4});doc.setFont("helvetica","normal");doc.setFontSize(6.3);doc.setTextColor(71,85,105);doc.text(`${a.role==="ELEVE"?"Élève "+(a.formation||""):"Formateur"} · ${durH(a.totalWorkMin)}`,margin+2,y+12);doc.text(`${a.workDays} JS · ${a.dispoDays} D · ${a.astreinteDays||0} AST`,margin+2,y+17);
+        for(let di=pg.dc.start;di<pg.dc.end;di++){const slot=a.days?.[di]||{type:"REST",code:"R"},x=margin+agentW+(di-pg.dc.start)*dayW,c=pdfSlotColors(slot),lines=pdfSlotLines(slot);doc.setFillColor(...c.fill);doc.setDrawColor(203,213,225);doc.rect(x,y,dayW,rowH,"FD");doc.setTextColor(...c.text);doc.setFont("helvetica","bold");doc.setFontSize(lines[0].length>7?7.2:9);doc.text(lines[0],x+dayW/2,y+6.5,{align:"center",maxWidth:dayW-2});doc.setFont("helvetica","normal");doc.setFontSize(6.1);doc.text(lines[1],x+dayW/2,y+12,{align:"center",maxWidth:dayW-2});doc.setFont("helvetica","bold");doc.setFontSize(5.4);doc.text(doc.splitTextToSize(lines[2],dayW-3).slice(0,2),x+dayW/2,y+16.5,{align:"center"});}y+=rowH;}
+      doc.setTextColor(71,85,105);doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text("Bleu : travail · vert : repos · jaune : DISPO · orange : SIMU/astreinte · violet : CP · rouge : alerte",margin,pageH-6);
+    });
+    doc.save("planning_caen_complet.pdf");setState("PDF global généré",`${pages.length} page(s) avec pagination des agents et des dates.`);
+  }catch(e){console.error(e);alert("Impossible de générer le PDF : "+(e?.message||e));}
+}
 
 
 function getServiceOrderAssignments(mode, ai=null, di=null){
