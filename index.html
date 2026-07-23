@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — JS Excel</title>
-<!-- Version 06.28 : calcul des heures de nuit 22h00-05h00 -->
+<!-- Version 06.29 : gestion stagiaires, absences, démissions et export des heures de nuit par période -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -139,6 +139,17 @@ body.dark .agent-manager .field input,body.dark .agent-manager .field select{bac
 .agent-chip button{border:none;border-radius:999px;background:rgba(239,68,68,.14);color:var(--bad-t);font-weight:950;cursor:pointer;padding:2px 7px}
 .agent-note{font-size:12px;color:var(--muted);line-height:1.45;margin-top:8px}
 @media(max-width:1200px){.agent-manager{grid-template-columns:repeat(2,1fr)}}@media(max-width:680px){.agent-manager{grid-template-columns:1fr}}
+.availability-manager{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr auto;gap:10px;align-items:end;margin-top:12px;padding:12px;border:1px dashed var(--line);border-radius:16px;background:rgba(148,163,184,.07)}
+.availability-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.availability-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(210px,1.2fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--solid);font-size:12px;font-weight:800}
+.availability-row.demission{background:#e5e7eb;color:#374151;border-color:#9ca3af}
+.availability-row.absence{background:#fee2e2;color:#7f1d1d;border-color:#fca5a5}
+.availability-row button{border:none;border-radius:9px;padding:7px 10px;background:#ef4444;color:#fff;font-weight:900;cursor:pointer}
+.trainee-delete-manager{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:10px;align-items:end;margin-top:12px}
+.tile.absence{background:#fee2e2;color:#991b1b;border-color:#fca5a5}.tile.absence:after{background:#ef4444}
+.tile.demission{background:#d1d5db;color:#374151;border-color:#9ca3af}.tile.demission:after{background:#6b7280}
+body.dark .tile.demission{background:#374151;color:#f3f4f6}body.dark .availability-row.demission{background:#374151;color:#f3f4f6}
+@media(max-width:900px){.availability-manager{grid-template-columns:1fr 1fr}.availability-row{grid-template-columns:1fr}}@media(max-width:620px){.availability-manager,.trainee-delete-manager{grid-template-columns:1fr}}
 
 /* === Visuel stagiaires / formations + sécurité astreinte élèves === */
 .plan tr.trainee-row td.agent{background:linear-gradient(135deg,rgba(99,102,241,.10),rgba(14,165,233,.06));border-left:5px solid #6366f1}
@@ -251,6 +262,7 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
       <button class="btn primary" id="btnGeneratePlanning" onclick="generatePlanning()">⚡ Générer le planning</button>
       <button class="btn purple" id="btnRecalculatePlanning" onclick="recalculateDifferent()" disabled>🔄 Recalcul différent</button>
       <button class="btn green" onclick="exportExcel()">📥 Export Excel</button>
+      <button class="btn purple" onclick="openNightHoursExport()">🌙 Export heures de nuit</button>
       <button class="btn red" onclick="exportPDF()">📄 Export PDF global</button>
       <button class="btn purple" onclick="openAgentDatePdfExport()">👤 PDF agent / dates</button>
       <button class="btn green" onclick="generateServiceOrderPocket()">📑 Pochette BCS complète</button>
@@ -278,6 +290,21 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
     </div>
     <div class="agent-note">Le formateur ajouté apparaît juste sous Yannick. L’élève rejoint son groupe F1 ou F2 et ne peut recevoir aucune astreinte. L’agent est disponible uniquement entre ses dates de début et de fin.</div>
     <div class="agent-list" id="extraAgentList"></div>
+    <div class="section-title" style="margin-top:18px"><h2>Supprimer un stagiaire</h2><span class="hint">Le stagiaire supprimé ne reviendra pas lors d’un nouveau calcul. Cette action peut être annulée dans la liste.</span></div>
+    <div class="trainee-delete-manager">
+      <div class="field"><label>Stagiaire</label><select id="traineeDeleteSelect"></select></div>
+      <button class="btn red" onclick="removeSelectedTrainee()">🗑 Supprimer le stagiaire</button>
+    </div>
+    <div class="agent-list" id="removedTraineeList"></div>
+    <div class="section-title" style="margin-top:18px"><h2>Absences et démissions</h2><span class="hint">L’agent est inutilisable pendant la période. Ses journées sont retirées et repassent automatiquement à couvrir.</span></div>
+    <div class="availability-manager">
+      <div class="field"><label>Agent</label><select id="availabilityAgent"></select></div>
+      <div class="field"><label>Motif</label><select id="availabilityType"><option value="ABSENCE">Absence</option><option value="DEMISSION">Démission (gris)</option></select></div>
+      <div class="field"><label>Du</label><input type="date" id="availabilityStart"></div>
+      <div class="field"><label>Au</label><input type="date" id="availabilityEnd"></div>
+      <button class="btn primary" onclick="addAvailabilityPeriod()">➕ Appliquer</button>
+    </div>
+    <div class="availability-list" id="availabilityList"></div>
   </section>
 
   <section class="card migration-panel hidden" id="saveMigrationPanel">
@@ -348,6 +375,10 @@ const TRAINEES = [
 const TRAINEE_WEEKLY_MAX_MIN = 35*60;
 let extraAgents = [];
 const EXTRA_AGENTS_KEY = "programmation_caen_extra_agents_v1";
+let removedTrainees = [];
+let availabilityPeriods = [];
+const AGENT_AVAILABILITY_KEY = "programmation_caen_availability_v1";
+const REMOVED_TRAINEES_KEY = "programmation_caen_removed_trainees_v1";
 const AGENT_IDENTITIES = {}; // volontairement vide : aucune identité complète ni matricule agent n’est stocké dans le code HTML.
 function getAgentIdentity(agentOrCode){
   const code = typeof agentOrCode === "string" ? agentOrCode : (agentOrCode?.code || agentOrCode?.shortName || agentOrCode?.name || "");
@@ -366,6 +397,21 @@ function enrichAgentIdentity(agent){
 
 function normalizeAgentCode(v){return String(v||"").trim().replace(/\s+/g," ");}
 function saveExtraAgents(){try{localStorage.setItem(EXTRA_AGENTS_KEY, JSON.stringify(extraAgents));}catch(e){console.warn("Sauvegarde agents supplémentaires impossible",e);}}
+function saveAgentManagement(){
+  try{
+    localStorage.setItem(AGENT_AVAILABILITY_KEY,JSON.stringify(availabilityPeriods));
+    localStorage.setItem(REMOVED_TRAINEES_KEY,JSON.stringify(removedTrainees));
+  }catch(e){console.warn("Sauvegarde des indisponibilités impossible",e);}
+}
+function loadAgentManagement(){
+  try{availabilityPeriods=JSON.parse(localStorage.getItem(AGENT_AVAILABILITY_KEY)||"[]");}catch(e){availabilityPeriods=[];}
+  try{removedTrainees=JSON.parse(localStorage.getItem(REMOVED_TRAINEES_KEY)||"[]");}catch(e){removedTrainees=[];}
+  if(!Array.isArray(availabilityPeriods)) availabilityPeriods=[];
+  if(!Array.isArray(removedTrainees)) removedTrainees=[];
+  availabilityPeriods=availabilityPeriods.filter(x=>x&&x.agent&&x.start&&x.end&&["ABSENCE","DEMISSION"].includes(x.type));
+  removedTrainees=[...new Set(removedTrainees.map(normalizeAgentCode).filter(Boolean))];
+  renderAgentManagement();
+}
 function loadExtraAgents(){
   try{extraAgents=JSON.parse(localStorage.getItem(EXTRA_AGENTS_KEY)||"[]"); if(!Array.isArray(extraAgents)) extraAgents=[];}catch(e){extraAgents=[];}
   extraAgents=extraAgents.map(x=>{
@@ -391,7 +437,7 @@ function updateAgentsCard(){
   if(card){
     const extraTrainers=extraAgents.filter(a=>!isTraineeDefinition(a)).length;
     const extraTrainees=extraAgents.filter(isTraineeDefinition).length;
-    const trainees=(typeof TRAINEES!=='undefined' ? TRAINEES.length : 0)+extraTrainees;
+    const trainees=(typeof TRAINEES!=='undefined' ? TRAINEES.filter(t=>!removedTrainees.includes(t.code)).length : 0)+extraAgents.filter(a=>isTraineeDefinition(a)&&!removedTrainees.includes(a.code)).length;
     const trainers=AGENTS.length+extraTrainers;
     card.querySelector('.val').textContent=`${trainers} formateur${trainers>1?'s':''} · ${trainees} élève${trainees>1?'s':''}`;
     card.querySelector('.sub').textContent=extraAgents.length ? `${AGENTS.length} formateurs fixes + ${extraTrainers} ajouté(s) · ${trainees} élèves F1/F2 · max 3 élèves/formateur · 35h/semaine` : `${AGENTS.length} formateurs fixes · ${trainees} élèves F1/F2 · max 3 élèves/formateur · 35h/semaine`;
@@ -401,6 +447,64 @@ function renderExtraAgentList(){
   const box=document.getElementById('extraAgentList'); if(!box) return;
   if(!extraAgents.length){box.innerHTML='<span class="agent-chip">Aucun agent supplémentaire</span>';return;}
   box.innerHTML=extraAgents.map((a,i)=>`<span class="agent-chip temp">${escapeHtml(a.code)} · ${isTraineeDefinition(a)?`Élève ${escapeHtml(a.formation)}`:"Formateur"} · ${escapeHtml(a.start)} → ${escapeHtml(a.end)} <button title="Supprimer" onclick="removeExtraAgent(${i})">×</button></span>`).join('');
+}
+function activeTraineeDefinitions(){
+  return [...TRAINEES.map(t=>({...t,role:"ELEVE",fixed:true})),...extraAgents.filter(isTraineeDefinition)]
+    .filter(t=>!removedTrainees.includes(t.code));
+}
+function renderAgentManagement(){
+  const traineeSelect=document.getElementById("traineeDeleteSelect");
+  if(traineeSelect){
+    const trainees=activeTraineeDefinitions();
+    traineeSelect.innerHTML=trainees.length?trainees.map(t=>`<option value="${escapeHtml(t.code)}">${escapeHtml(t.code)} · ${escapeHtml(t.formation||"")}</option>`).join(""):'<option value="">Aucun stagiaire actif</option>';
+  }
+  const removedBox=document.getElementById("removedTraineeList");
+  if(removedBox) removedBox.innerHTML=removedTrainees.length?removedTrainees.map((code,i)=>`<span class="agent-chip">${escapeHtml(code)} supprimé <button title="Rétablir" onclick="restoreTrainee(${i})">↩</button></span>`).join(""):'<span class="agent-chip">Aucun stagiaire supprimé</span>';
+  const availabilityAgent=document.getElementById("availabilityAgent");
+  if(availabilityAgent){
+    const defs=[...getAllAgentDefinitions(),...activeTraineeDefinitions()];
+    availabilityAgent.innerHTML=defs.map(d=>`<option value="${escapeHtml(d.code)}">${escapeHtml(d.code)} · ${isTraineeDefinition(d)?"Stagiaire":"Formateur"}</option>`).join("");
+  }
+  const list=document.getElementById("availabilityList");
+  if(list) list.innerHTML=availabilityPeriods.length?availabilityPeriods.map((p,i)=>`<div class="availability-row ${p.type.toLowerCase()}"><span>${escapeHtml(p.agent)}</span><span>${p.type==="DEMISSION"?"Démission":"Absence"} · ${escapeHtml(p.start)} → ${escapeHtml(p.end)}</span><button onclick="removeAvailabilityPeriod(${i})">Supprimer</button></div>`).join(""):'<div class="agent-note">Aucune absence ou démission enregistrée.</div>';
+  updateAgentsCard();
+}
+function removeSelectedTrainee(){
+  const code=document.getElementById("traineeDeleteSelect")?.value;
+  if(!code) return;
+  if(!confirm(`Supprimer ${code} de la programmation ? Ses journées seront retirées.`)) return;
+  removedTrainees.push(code);
+  removedTrainees=[...new Set(removedTrainees)];
+  if(planning?.agents) planning.agents=planning.agents.filter(a=>a.name!==code);
+  saveAgentManagement(); renderAgentManagement();
+  if(planning){computeWarnings();renderPlanning();}
+  setState("Stagiaire supprimé",`${code} a été retiré de la programmation.`);
+}
+function restoreTrainee(index){
+  const code=removedTrainees.splice(index,1)[0];
+  saveAgentManagement(); renderAgentManagement();
+  setState("Stagiaire rétabli",`${code||"Le stagiaire"} sera repris au prochain calcul.`);
+}
+function addAvailabilityPeriod(){
+  const agent=document.getElementById("availabilityAgent")?.value;
+  const type=document.getElementById("availabilityType")?.value;
+  const start=document.getElementById("availabilityStart")?.value;
+  const end=document.getElementById("availabilityEnd")?.value;
+  if(!agent||!start||!end){alert("Choisis l’agent et renseigne les deux dates.");return;}
+  if(end<start){alert("La date de fin doit être postérieure ou égale à la date de début.");return;}
+  availabilityPeriods.push({agent,type:type==="DEMISSION"?"DEMISSION":"ABSENCE",start,end});
+  saveAgentManagement(); renderAgentManagement();
+  if(planning){applyAvailabilityPeriods(planning.agents,planning.dates);computeWarnings();renderPlanning();}
+  setState(type==="DEMISSION"?"Démission appliquée":"Absence appliquée",`${agent} est indisponible du ${start} au ${end}. Les journées concernées ont été retirées.`);
+}
+function removeAvailabilityPeriod(index){
+  const removed=availabilityPeriods.splice(index,1)[0];
+  saveAgentManagement(); renderAgentManagement();
+  if(planning){
+    const a=planning.agents.find(x=>x.name===removed?.agent);
+    planning.dates.forEach((d,di)=>{if(a&&isInDateRange(d,removed.start,removed.end)&&["ABSENCE","DEMISSION"].includes(a.days?.[di]?.type)) a.days[di]=isWeekend(d)?{type:"REST",code:"R",workMin:0,startMin:null,endMin:null,reason:"Repos samedi/dimanche imposé"}:makeDispoSlot();});
+    applyAvailabilityPeriods(planning.agents,planning.dates);computeWarnings();renderPlanning();
+  }
 }
 function addExtraAgent(){
   const code=normalizeAgentCode(document.getElementById('newAgentCode')?.value);
@@ -415,22 +519,22 @@ function addExtraAgent(){
   if(end<start){alert('La date de fin doit être après la date de début.');return;}
   if(AGENTS.includes(code) || TRAINEES.some(t=>t.code===code) || extraAgents.some(a=>a.code===code)){alert('Cet agent existe déjà.');return;}
   const agent={code,fullName:"",matricule:"",start,end,role,formation};
-  extraAgents.push(agent); saveExtraAgents(); renderExtraAgentList(); updateAgentsCard();
+  extraAgents.push(agent); saveExtraAgents(); renderExtraAgentList(); updateAgentsCard(); renderAgentManagement();
   ['newAgentCode','newAgentFullName','newAgentMatricule','newAgentStart','newAgentEnd','newAgentFormation'].forEach(id=>{const el=document.getElementById(id); if(el) el.value='';});
   const roleInput=document.getElementById("newAgentRole"); if(roleInput) roleInput.value="FORMATEUR";
   updateNewAgentRoleFields();
   if(planning && planning.dates?.length){addAgentToCurrentPlanning(agent); computeWarnings(); renderPlanning(); setState('Agent ajouté',`${code} ajouté comme ${role==="ELEVE"?`élève ${formation}`:"formateur"} à la programmation existante.`);} else setState('Agent ajouté',`${code} sera pris en compte comme ${role==="ELEVE"?`élève ${formation}`:"formateur"} à la prochaine génération.`);
 }
 function removeExtraAgent(index){
-  const removed=extraAgents.splice(index,1)[0]; saveExtraAgents(); renderExtraAgentList(); updateAgentsCard();
+  const removed=extraAgents.splice(index,1)[0]; saveExtraAgents(); renderExtraAgentList(); updateAgentsCard(); renderAgentManagement();
   if(removed && planning?.agents){planning.agents=planning.agents.filter(a=>a.name!==removed.code); computeWarnings(); renderPlanning();}
   setState('Agent supprimé', removed ? `${removed.code} retiré des agents supplémentaires.` : 'Liste mise à jour.');
 }
 function getAllAgentDefinitions(){return [...AGENTS.map(code=>({code,fixed:true,role:"FORMATEUR"})), ...extraAgents.filter(a=>!isTraineeDefinition(a)).map(a=>({...a,fixed:false,role:"FORMATEUR",formation:""}))];}
 function getTraineeDefinitions(){
-  const fixed=TRAINEES.map(t=>({code:t.code,fullName:t.fullName,matricule:"",fixed:true,role:"ELEVE",formation:t.formation||"F1"}));
+  const fixed=TRAINEES.filter(t=>!removedTrainees.includes(t.code)).map(t=>({code:t.code,fullName:t.fullName,matricule:"",fixed:true,role:"ELEVE",formation:t.formation||"F1"}));
   const added=extraAgents.filter(isTraineeDefinition).map(a=>({...a,fixed:false,role:"ELEVE"}));
-  return ["F1","F2"].flatMap(formation=>[...fixed,...added].filter(a=>a.formation===formation));
+  return ["F1","F2"].flatMap(formation=>[...fixed,...added].filter(a=>a.formation===formation&&!removedTrainees.includes(a.code)));
 }
 function isTraineeAgent(agent){return !!agent && agent.role==="ELEVE";}
 function trainerOnlyAgents(list){return (list||[]).filter(a=>!isTraineeAgent(a));}
@@ -447,6 +551,22 @@ function removeTraineeAstreintes(){
   });
 }
 function makeInactiveSlot(reason){return {type:'INACTIF',code:'—',startMin:null,endMin:null,workMin:0,amplitudeMin:0,forced:false,reason:reason||'Agent hors période de présence'};}
+function makeUnavailableSlot(type,reason){
+  const demission=type==="DEMISSION";
+  return {type:demission?"DEMISSION":"ABSENCE",code:demission?"DEM":"ABS",startMin:null,endMin:null,workMin:0,amplitudeMin:0,forced:false,reason:reason||(demission?"Démission":"Absence")};
+}
+function applyAvailabilityPeriods(agents,dates){
+  (agents||[]).forEach(a=>{
+    (availabilityPeriods||[]).filter(p=>p.agent===a.name).forEach(p=>{
+      (dates||[]).forEach((d,di)=>{
+        if(isInDateRange(d,p.start,p.end)) a.days[di]=makeUnavailableSlot(p.type,`${p.type==="DEMISSION"?"Démission":"Absence"} du ${p.start} au ${p.end}`);
+      });
+    });
+  });
+}
+function availabilityFor(agentName,date){
+  return (availabilityPeriods||[]).find(p=>p.agent===agentName&&isInDateRange(date,p.start,p.end))||null;
+}
 function applyAgentActivityWindows(agents,dates){
   agents.forEach(a=>{
     if(!a.start || !a.end) return;
@@ -473,8 +593,8 @@ function addAgentToCurrentPlanning(def){
   }
 }
 const AUTOSAVE_KEY = "programmation_caen_autosave_v1"; // clé volontairement stable entre les versions HTML
-const APP_VERSION = "06.28-PCPROG";
-const SAVE_SCHEMA_VERSION = 3;
+const APP_VERSION = "06.29-PCPROG";
+const SAVE_SCHEMA_VERSION = 4;
 const SAVE_MIN_COMPATIBLE_VERSION = 1;
 let autosaveReady = false;
 let programmingSaveLoaded = false;
@@ -959,7 +1079,7 @@ function getPeriodDates(){
   document.getElementById("periodSub").textContent=`${dates.length} jours planifiés`;
   return dates;
 }
-function isWorking(s){return s && s.type!=="REST" && s.type!=="CP" && s.type!=="INACTIF"}
+function isWorking(s){return s && !["REST","CP","INACTIF","ABSENCE","DEMISSION"].includes(s.type)}
 
 function serviceFamily(svc){
   if(!svc || svc.type==="REST" || svc.type==="CP" || svc.type==="INACTIF") return "REPOS";
@@ -1456,6 +1576,8 @@ function serializePlanningForSave(){
     seed,
     sourceFileName:document.getElementById("fileName")?.textContent||"",
     extraAgents,
+    removedTrainees,
+    availabilityPeriods,
     extractedJS,
     controls:{
       dateStart:document.getElementById("dateStart").value||"",
@@ -1502,6 +1624,13 @@ function normalizeSavedSlot(slot){
     normalized.workMin=0;
     normalized.amplitudeMin=0;
   }
+  if(normalized.type==="ABSENCE" || normalized.type==="DEMISSION"){
+    normalized.code=normalized.type==="DEMISSION"?"DEM":"ABS";
+    normalized.startMin=null;
+    normalized.endMin=null;
+    normalized.workMin=0;
+    normalized.amplitudeMin=0;
+  }
   if(typeof normalized.workMin!=="number") normalized.workMin=0;
   if(typeof normalized.amplitudeMin!=="number") normalized.amplitudeMin=normalized.workMin||0;
   normalized.forced=!!normalized.forced;
@@ -1528,6 +1657,8 @@ function migrateSaveFile(obj){
   if(!migrated.controls.minRest28) migrated.controls.minRest28="8";
   if(!migrated.controls.minRest) migrated.controls.minRest="13";
   migrated.extraAgents=Array.isArray(migrated.extraAgents) ? migrated.extraAgents : [];
+  migrated.removedTrainees=Array.isArray(migrated.removedTrainees) ? migrated.removedTrainees : [];
+  migrated.availabilityPeriods=Array.isArray(migrated.availabilityPeriods) ? migrated.availabilityPeriods : [];
   migrated.extractedJS=Array.isArray(migrated.extractedJS) ? migrated.extractedJS : [];
   const p=migrated.planning;
   p.dates=Array.isArray(p.dates) ? p.dates : [];
@@ -1617,6 +1748,9 @@ function loadAutoPlanning(){
     try{localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(obj));}catch(_e){}
     if(obj.controls){Object.entries(obj.controls).forEach(([id,val])=>{const el=document.getElementById(id); if(el) el.value=val;});}
     if(Array.isArray(obj.extraAgents)){extraAgents=obj.extraAgents; saveExtraAgents(); loadExtraAgents();}
+    if(Array.isArray(obj.removedTrainees)) removedTrainees=obj.removedTrainees;
+    if(Array.isArray(obj.availabilityPeriods)) availabilityPeriods=obj.availabilityPeriods;
+    saveAgentManagement(); renderAgentManagement();
     const restored=reviveSavedPlanning(obj); if(!restored || !restored.dates?.length) return false;
     planning=restored;
     saveMigrationReport=reconcileSavedPlanningWithCurrentCatalog("Auto-save navigateur");
@@ -1869,6 +2003,9 @@ function handleProgrammingSaveFile(ev){
       obj=migrateSaveFile(obj);
       if(obj.controls){Object.entries(obj.controls).forEach(([id,val])=>{const el=document.getElementById(id); if(el) el.value=val;});}
       if(Array.isArray(obj.extraAgents)){extraAgents=obj.extraAgents; saveExtraAgents(); loadExtraAgents();}
+      if(Array.isArray(obj.removedTrainees)) removedTrainees=obj.removedTrainees;
+      if(Array.isArray(obj.availabilityPeriods)) availabilityPeriods=obj.availabilityPeriods;
+      saveAgentManagement(); renderAgentManagement();
       const restored=reviveSavedPlanning(obj);
       if(!restored || !restored.dates?.length){alert("La sauvegarde est lisible, mais elle ne contient pas de planning exploitable.");return;}
       planning=restored;
@@ -1903,6 +2040,7 @@ function generatePlanning(){
   planning={dates,agents,uncovered:[],forced:[],dispoCount:0};
   applyAgentActivityWindows(agents,dates);
   applyDefaultAbsences(agents,dates);
+  applyAvailabilityPeriods(agents,dates);
   const byDate=new Map();
   extractedJS.forEach(js=>js.dates.forEach(d=>{const k=dateKey(d); if(!byDate.has(k))byDate.set(k,[]); byDate.get(k).push(js)}));
   dates.forEach((date,di)=>{
@@ -2248,6 +2386,8 @@ function renderPlanning(){
       let cls="rest", code="R", h="Repos", ex="", title="Repos";
       if(!s){s={type:"REST",code:"R",reason:"Repos"};}
       if(s.type==="INACTIF"){cls="inactive";code="—";h="Inactif";title=s.reason||"Agent hors période de présence"}
+      if(s.type==="ABSENCE"){cls="absence";code="ABS";h="Absent";title=s.reason||"Absence"}
+      if(s.type==="DEMISSION"){cls="demission";code="DEM";h="Démission";title=s.reason||"Démission"}
       if(s.type==="DISPO"){cls="dispo";code="DISPO";h="5h00";title="DISPO : "+s.reason}
       if(s.type==="ASTREINTE"){
         if(a.role==="ELEVE"){ s=makeDispoSlot(); a.days[di]=s; cls="dispo"; code="DISPO"; h="5h00"; title="DISPO : astreinte interdite pour les stagiaires"; }
@@ -2410,7 +2550,7 @@ function resetPlanning(){clearAutoPlanning();planning=null;saveMigrationReport=n
 function openDetail(ai,di){
   const a=planning.agents[ai], s=a.days[di], d=planning.dates[di];
   document.getElementById("modalTitle").textContent=`${a.name} · ${fmt(d)}`;
-  document.getElementById("modalSub").textContent=s.type==="REST"?"Repos":s.type==="DISPO"?"Journée DISPO":s.type==="ASTREINTE"?"Astreinte journée":s.type==="CP"?"Congé payé":s.type==="INACTIF"?"Agent hors période de présence":"Journée de service "+s.code;
+  document.getElementById("modalSub").textContent=s.type==="REST"?"Repos":s.type==="DISPO"?"Journée DISPO":s.type==="ASTREINTE"?"Astreinte journée":s.type==="CP"?"Congé payé":s.type==="INACTIF"?"Agent hors période de présence":s.type==="ABSENCE"?"Absence":s.type==="DEMISSION"?"Démission":"Journée de service "+s.code;
 
   const missingToday=getMissingForDate(di);
   const codesAvailable=[...new Set(extractedJS.map(j=>j.code))].sort((x,y)=>x.localeCompare(y,"fr",{numeric:true}));
@@ -2446,7 +2586,7 @@ function openDetail(ai,di){
   html+=`</div><div class="hint" style="margin-bottom:14px">Si tu mets une journée en repos, CP ou DISPO, la JS supprimée repasse automatiquement en <b>journée non couverte</b> et le compteur du jour devient rouge/orange. Elle sera proposée en haut de cette fenêtre dans “Journées à couvrir ce jour”. Si la règle des 13h de repos n'est pas respectée, une confirmation te sera demandée pour forcer. Si tu affectes une JS sur une date où elle n'est pas prévue au régime Excel, elle passera en erreur rouge.</div>`;
 
   html+=`<div class="detail-grid">
-    <div class="detail-box"><span>Type</span>${s.type==="WORK"?"Travail":s.type==="DISPO"?"DISPO":s.type==="ASTREINTE"?"Astreinte":s.type==="CP"?"Congé payé":"Repos"}</div>
+    <div class="detail-box"><span>Type</span>${s.type==="WORK"?"Travail":s.type==="DISPO"?"DISPO":s.type==="ASTREINTE"?"Astreinte":s.type==="CP"?"Congé payé":s.type==="ABSENCE"?"Absence":s.type==="DEMISSION"?"Démission":s.type==="INACTIF"?"Inactif":"Repos"}</div>
     <div class="detail-box"><span>Code</span>${s.code||"R"}</div>
     <div class="detail-box"><span>PS</span>${hhmm(s.startMin)}</div>
     <div class="detail-box"><span>FS</span>${hhmm(s.endMin)}</div>
@@ -2474,6 +2614,8 @@ function createManualJS(ai,di,forcedCode=""){
   if(!planning || !planning.agents?.[ai] || !planning.dates?.[di]) return;
   const a=planning.agents[ai];
   const d=planning.dates[di];
+  const unavailable=availabilityFor(a.name,d);
+  if(unavailable){alert(`Impossible : ${a.name} est en ${unavailable.type==="DEMISSION"?"démission":"absence"} sur cette date.`);return;}
   if(isWeekend(d)){alert("Impossible de créer une journée sur un samedi/dimanche : repos imposé pour tous.");return;}
   const code=(forcedCode || document.getElementById("manualCode")?.value || "").trim().toUpperCase();
   const ps=minOfTime(document.getElementById("manualPS")?.value||"");
@@ -2522,6 +2664,8 @@ function setManual(ai,di,type,code){
   const a=planning.agents[ai];
   const old=a.days[di];
   const associated=a.role==="ELEVE"?[]:associatedTraineesForTrainerDay(a.name,di);
+  const unavailable=availabilityFor(a.name,planning.dates[di]);
+  if(unavailable){alert(`Impossible : ${a.name} est en ${unavailable.type==="DEMISSION"?"démission":"absence"} sur cette date. Supprime d’abord la période d’indisponibilité pour modifier la journée.`);return;}
   if(a.role==="ELEVE" && type==="ASTREINTE"){alert("Impossible : aucune astreinte ne peut être attribuée à un stagiaire.");return;}
   if(a.start && a.end && !isInDateRange(planning.dates[di],a.start,a.end) && ["WORK","DISPO","ASTREINTE"].includes(type)){
     alert("Impossible : cet agent est hors de sa période de présence sur cette date.");
@@ -2642,6 +2786,9 @@ function exportExcel(){
     if(s.type==="DISPO") return "DISPO\n10:00-15:00\n5h00";
     if(s.type==="ASTREINTE") return "ASTREINTE\n08:00-16:00\n8h00";
     if(s.type==="CP") return "CP";
+    if(s.type==="ABSENCE") return "ABSENCE";
+    if(s.type==="DEMISSION") return "DÉMISSION";
+    if(s.type==="INACTIF") return "INACTIF";
     return `${s.code}\n${hhmm(s.startMin)}-${hhmm(s.endMin)}\n${durH(s.workMin||0)} · Nuit ${durH(nightMinutes(s))}${s.forced?"\n⚠ "+(s.reason||""):""}`;
   }),durH(a.totalWorkMin),durH(a.trainHeadMin||0),durH((a.days||[]).reduce((sum,s)=>sum+nightMinutes(s),0)),a.workDays,a.dispoDays,a.astreinteDays||0,a.cpDays,a.forced.length,(a.weeklyWarnings||[]).map(w=>`${w.week} ${durH(w.min)} (+${durH(w.overflow)})`).join(" ; ")]));
   const ws=XLSX.utils.aoa_to_sheet(rows);
@@ -2662,6 +2809,8 @@ function exportExcel(){
         else if(slot?.type==="DISPO") rgb="FEF3C7";
         else if(slot?.type==="ASTREINTE") rgb="FFEDD5";
         else if(slot?.type==="CP") rgb="F3E8FF";
+        else if(slot?.type==="ABSENCE") rgb="FEE2E2";
+        else if(slot?.type==="DEMISSION") rgb="D1D5DB";
         ws[addr].s={...ws[addr].s,fill:excelFill(rgb),font:{bold:slot?.type==="WORK"||slot?.type==="ASTREINTE",color:{rgb:"0F172A"}}};
       }
     }
@@ -2693,6 +2842,50 @@ function exportExcel(){
 
   XLSX.writeFile(wb,"planning_caen_js_excel.xlsx");
   setState("Excel généré","Export Excel amélioré avec couleurs, cellules détaillées et récapitulatif.");
+}
+
+function openNightHoursExport(){
+  if(!hasUnlockedProgrammingData()){alert("Génère ou ouvre d’abord une programmation avant d’exporter.");return;}
+  const first=planning.dates?.[0]?dateKey(planning.dates[0]):"";
+  const last=planning.dates?.length?dateKey(planning.dates[planning.dates.length-1]):"";
+  document.getElementById("modalTitle").textContent="Export des heures de nuit";
+  document.getElementById("modalSub").textContent="Calcul 22h00–05h00, agent par agent, sur la période choisie";
+  document.getElementById("modalBody").innerHTML=`<div class="export-filter" style="grid-template-columns:1fr 1fr">
+    <div class="field"><label>Du</label><input type="date" id="nightExportStart" value="${first}" min="${first}" max="${last}"></div>
+    <div class="field"><label>Au</label><input type="date" id="nightExportEnd" value="${last}" min="${first}" max="${last}"></div>
+  </div>
+  <div class="item">Le fichier contient un récapitulatif par agent et le détail de chaque journée comportant des heures entre 22h00 et 05h00.</div>
+  <button class="btn purple" onclick="exportNightHoursByPeriod()">🌙 Générer l’Excel</button>`;
+  document.getElementById("detailModal").classList.add("open");
+}
+function exportNightHoursByPeriod(){
+  const start=document.getElementById("nightExportStart")?.value;
+  const end=document.getElementById("nightExportEnd")?.value;
+  if(!start||!end||end<start){alert("Vérifie les dates de la période.");return;}
+  const wb=XLSX.utils.book_new();
+  const summary=[["Agent","Rôle","Formation","Du","Au","Heures de nuit","Journées avec nuit"]];
+  const details=[["Agent","Rôle","Formation","Date","JS","PS","FS","Heures de nuit"]];
+  planning.agents.forEach(a=>{
+    let total=0,count=0;
+    (a.days||[]).forEach((s,di)=>{
+      const k=dateKey(planning.dates[di]);
+      if(k<start||k>end||s?.type!=="WORK") return;
+      const night=nightMinutes(s);
+      if(night<=0) return;
+      total+=night; count++;
+      details.push([a.name,a.role==="ELEVE"?"Élève":"Formateur",a.formation||"",fmtShort(planning.dates[di]),s.code||"",hhmm(s.startMin),hhmm(s.endMin),durH(night)]);
+    });
+    summary.push([a.name,a.role==="ELEVE"?"Élève":"Formateur",a.formation||"",start,end,durH(total),count]);
+  });
+  const wsSummary=XLSX.utils.aoa_to_sheet(summary);
+  wsSummary["!cols"]=[{wch:24},{wch:12},{wch:10},{wch:12},{wch:12},{wch:18},{wch:20}];
+  const wsDetails=XLSX.utils.aoa_to_sheet(details);
+  wsDetails["!cols"]=[{wch:24},{wch:12},{wch:10},{wch:12},{wch:12},{wch:8},{wch:8},{wch:18}];
+  XLSX.utils.book_append_sheet(wb,wsSummary,"Récap heures nuit");
+  XLSX.utils.book_append_sheet(wb,wsDetails,"Détail heures nuit");
+  XLSX.writeFile(wb,`heures_nuit_${start}_${end}.xlsx`);
+  closeModal();
+  setState("Heures de nuit exportées",`Export agent par agent du ${start} au ${end}.`);
 }
 
 function openAgentDatePdfExport(){
@@ -3257,7 +3450,7 @@ function generateIcsSingle(ai,di){
   downloadIcs([item],`calendrier_${safeCalendarFilename(item.agent.name)}_${fmtShort(item.date).replace(/\//g,"-")}.ics`,`Journée ${item.agent.name} ${fmt(item.date)}`);
 }
 
-window.addEventListener("load",()=>{loadExtraAgents(); restoreEmbedded(); loadAutoPlanning(); autosaveReady=true;});
+window.addEventListener("load",()=>{loadExtraAgents(); loadAgentManagement(); restoreEmbedded(); loadAutoPlanning(); renderAgentManagement(); autosaveReady=true;});
 </script>
 </body>
 </html>
