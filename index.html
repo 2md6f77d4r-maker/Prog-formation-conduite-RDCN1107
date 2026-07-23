@@ -4,8 +4,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Programmation Caen — JS Excel</title>
-<!-- Version 06.29 : gestion stagiaires, absences, démissions et export des heures de nuit par période -->
+<title>Programmation Caen — Planning opérationnel</title>
+<!-- Version 06.30 : interface ergonomique, fluide et compatible avec les fonctions V06.29 -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -227,14 +227,90 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
 .migration-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:760px){.migration-summary{grid-template-columns:repeat(2,1fr)}.migration-row{grid-template-columns:1fr}.migration-row button{width:100%}}
 
+/* === V06.31 : interface menthe, commandes regroupées et filtres === */
+:root{
+  --primary:#42b89c;--primary2:#72d4bd;--primary-dark:#237c68;--focus:rgba(66,184,156,.20);
+  --shadow:0 8px 28px rgba(15,23,42,.07);
+}
+html{scroll-behavior:smooth}
+body{background:#f5f8f7;letter-spacing:-.005em;color:#334155}
+body.dark{background:#0b1514}
+header{background:rgba(31,83,72,.97);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.10);box-shadow:0 4px 18px rgba(2,6,23,.14)}
+.header-inner{padding:11px 22px}
+.brand-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#72d4bd;font-size:21px}
+.brand h1{font-size:18px;letter-spacing:.025em}.brand p{font-size:12px;color:#b9cbc6}
+.nav{align-items:center}.nav button,.theme{padding:8px 11px;border-radius:9px;font-size:12px}
+.nav button.active{background:#42b89c;box-shadow:0 5px 14px rgba(66,184,156,.24)}
+main{max-width:1900px;margin-top:16px;gap:14px}
+.card{border-radius:14px;padding:16px;box-shadow:var(--shadow);backdrop-filter:none;background:var(--solid)}
+.cards{gap:8px}.info-card{border-radius:12px;padding:12px;background:var(--solid);box-shadow:0 3px 14px rgba(15,23,42,.04)}
+.info-card .label{color:var(--muted);font-size:10px}.info-card .val{margin-top:7px;font-size:15px}.info-card .sub{margin-top:4px}
+#commandCard{position:relative;z-index:35;overflow:visible;border-top:4px solid #72d4bd}
+.command-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.command-heading h2{margin:0;font-size:17px}.command-heading .hint{max-width:740px;text-align:right}
+.controls{grid-template-columns:2fr repeat(5,minmax(130px,1fr));gap:9px;padding:12px;border-radius:12px;background:rgba(148,163,184,.065)}
+.field label{font-size:10px;margin-bottom:5px}
+.field input,.field select{padding:9px 10px;border-radius:9px;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+.field input:focus,.field select:focus{border-color:#42b89c;box-shadow:0 0 0 3px var(--focus)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;padding:10px 0 0;background:transparent;border:0;border-radius:0;margin-top:10px;align-items:center}
+.btn{min-height:40px;padding:9px 12px;border-radius:9px!important;font-size:12px;box-shadow:none!important;text-shadow:none!important;transition:transform .13s,filter .13s,box-shadow .13s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 5px 13px rgba(15,23,42,.11)!important}
+.btn.primary{background:#42b89c;color:#153d35}.btn.purple{background:#64748b}.btn.green{background:#42b89c!important;color:#153d35!important}.btn.red{background:#c75d58!important}.btn.orange{background:#b77928}
+#btnGeneratePlanning{font-size:14px;background:linear-gradient(135deg,#42b89c,#72d4bd);color:#153d35;box-shadow:0 6px 16px rgba(66,184,156,.22)!important}
+#btnRecalculatePlanning{font-size:13px}
+.legend{grid-column:1/-1;margin:2px 0 0;padding:9px 4px 0;border-top:1px solid var(--line)}
+.section-title h2{font-size:16px}.section-title{margin-bottom:10px}
+#planningCard{border-top:4px solid #42b89c;padding:14px}
+.planning-wrap{border-radius:10px;max-height:76vh;box-shadow:inset 0 0 0 1px rgba(15,23,42,.02)}
+.plan th{padding:10px 7px}.plan td.slot{height:82px;padding:4px}.tile{height:72px;border-radius:9px}.code{font-size:18px}.hours{margin-top:4px;font-size:12px}
+.plan th.agent-head,.plan td.agent{min-width:205px;max-width:205px}.plan td.agent{padding:8px 10px}
+.agent-meta{margin-top:4px;line-height:1.4}.avatar{width:26px;height:26px}
+.day-th{min-width:110px}.plan td.slot{min-width:110px}
+.bottom{gap:9px}.panel{padding:14px}.metric-big{font-size:26px}
+.modal-overlay{backdrop-filter:blur(4px)}.modal{border-radius:14px;padding:18px}
+.back-to-top{position:fixed;right:18px;bottom:18px;z-index:60;width:42px;height:42px;border:0;border-radius:12px;background:#42b89c;color:#153d35;font-size:18px;cursor:pointer;box-shadow:0 8px 24px rgba(66,184,156,.28);opacity:0;pointer-events:none;transform:translateY(8px);transition:.18s}
+.back-to-top.show{opacity:1;pointer-events:auto;transform:none}
+body.compact .planning-wrap{max-height:82vh}
+body.compact .plan td.slot{height:67px;min-width:96px}
+body.compact .day-th{min-width:96px}
+body.compact .tile{height:58px;border-radius:8px}
+body.compact .tile .code{font-size:16px}
+body.compact .tile .hours{font-size:11px;margin-top:2px}
+body.compact .tile .extra,body.compact .tile .js-type{font-size:9px}
+body.compact .plan th{padding:7px 5px}
+body.compact .plan td.agent{padding:6px 9px}
+body.compact .agent-meta{font-size:10px}
+.density-active{background:#42b89c!important;color:#153d35!important}
+.action-menu{position:relative}.action-menu[open]{z-index:220}.action-menu>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:7px}.action-menu>summary::-webkit-details-marker{display:none}
+.action-menu[open]>summary{box-shadow:0 0 0 3px var(--focus)!important}
+.action-popover{position:absolute;top:calc(100% + 7px);right:0;z-index:240;min-width:245px;max-height:min(420px,calc(100vh - 100px));overflow-y:auto;padding:7px;border:1px solid var(--line);border-radius:12px;background:var(--solid)!important;color:var(--ink)!important;opacity:1;box-shadow:0 16px 38px rgba(15,23,42,.24)}
+.action-popover button{display:flex;width:100%;align-items:center;gap:8px;border:0;border-radius:8px;background:transparent;color:var(--ink);padding:9px 10px;text-align:left;font-size:12px;font-weight:800;cursor:pointer}.action-popover button:hover{background:rgba(66,184,156,.13)}
+.dashboard{display:grid;grid-template-columns:repeat(5,minmax(135px,1fr));gap:8px;margin:0 0 12px}.dash-card{padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--solid)}.dash-card .dash-value{font-size:22px;font-weight:950;color:#237c68}.dash-card .dash-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:900}
+.planning-tools{position:sticky;top:72px;z-index:28;display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:0 0 10px;padding:10px;border:1px solid var(--line);border-radius:11px;background:rgba(245,248,247,.96);backdrop-filter:blur(12px)}body.dark .planning-tools{background:rgba(11,21,20,.96)}
+.planning-tools .field{min-width:190px}.planning-tools .field:first-child{flex:1}.filter-count{margin-left:auto;padding:8px 10px;color:var(--muted);font-size:11px;font-weight:900}
+.agent-actions{display:flex;gap:4px;margin-top:6px}.agent-quick{border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);padding:4px 6px;font-size:10px;font-weight:850;cursor:pointer}.agent-quick:hover{border-color:#42b89c;color:#237c68;background:rgba(66,184,156,.10)}
+.legend-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(66,184,156,.055)}.legend-panel summary{cursor:pointer;font-size:12px;font-weight:900;color:var(--muted)}.legend-panel .legend{margin-top:9px;padding-top:9px}
+body.dark .dash-card .dash-value{color:#8be0cc}
+tr.filter-hidden{display:none}
+
+/* === V06.32 : menus visibles + modification des JS en plein écran === */
+.modal-overlay{z-index:2000}
+body.matrix-fullscreen #planningCard{z-index:500!important}
+body.matrix-fullscreen #planningCard .planning-tools{top:0}
+body.matrix-fullscreen .modal-overlay.open{display:flex!important;z-index:2000!important}
+body.matrix-fullscreen .back-to-top{display:none}
+@media(max-width:1450px){.controls{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:900px){.controls{grid-template-columns:repeat(2,1fr)}.command-heading{align-items:flex-start;flex-direction:column}.command-heading .hint{text-align:left}.cards{grid-template-columns:repeat(2,1fr)}.dashboard{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:620px){main{padding:0 8px}.controls,.cards,.dashboard{grid-template-columns:1fr}.btns>.btn,.btns>.action-menu{width:100%}.action-menu>summary{justify-content:center}.action-popover{left:0;right:auto;width:100%}.legend{grid-column:auto}.brand p{display:none}.nav button{flex:1}.autosave-status{order:10}.card{padding:12px}.back-to-top{right:10px;bottom:10px}.planning-tools{top:112px}.planning-tools .field{width:100%}.filter-count{margin-left:0}}
+
 </style>
 </head>
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs à partir du nouveau référentiel JS ADC Phase 4 — V2</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.32</p></div></div>
     <div class="nav">
-      <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="exportExcel()">📥 Export</button><button onclick="openHelp()">❔ Aide</button>
+      <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="openMenu('exportMenu')">📥 Exporter</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
       <div class="autosave-status idle" id="autosaveStatus" title="État de la sauvegarde automatique navigateur"><span class="autosave-dot"></span><span id="autosaveText">Auto-save en attente</span></div>
     </div>
@@ -249,7 +325,8 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
     <div class="info-card"><div class="label">État</div><div class="val" id="stateInfo">Chargement...</div><div class="sub" id="stateSub">Initialisation</div></div>
   </section>
 
-  <section class="card">
+  <section class="card" id="commandCard">
+    <div class="command-heading"><h2>Préparer la programmation</h2><span class="hint">Chargez vos données, ajustez la période si nécessaire, puis générez le planning.</span></div>
     <div class="controls">
       <div class="field"><label>Changer le fichier Excel</label><input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleFile(event)"></div>
       <div class="field"><label>Début forcé facultatif</label><input type="date" id="dateStart"></div>
@@ -261,18 +338,19 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
     <div class="btns">
       <button class="btn primary" id="btnGeneratePlanning" onclick="generatePlanning()">⚡ Générer le planning</button>
       <button class="btn purple" id="btnRecalculatePlanning" onclick="recalculateDifferent()" disabled>🔄 Recalcul différent</button>
-      <button class="btn green" onclick="exportExcel()">📥 Export Excel</button>
-      <button class="btn purple" onclick="openNightHoursExport()">🌙 Export heures de nuit</button>
-      <button class="btn red" onclick="exportPDF()">📄 Export PDF global</button>
-      <button class="btn purple" onclick="openAgentDatePdfExport()">👤 PDF agent / dates</button>
-      <button class="btn green" onclick="generateServiceOrderPocket()">📑 Pochette BCS complète</button>
-      <button class="btn purple" onclick="generateIcsAllPlanning()">📆 ICS toute la programmation</button>
+      <details class="action-menu" id="exportMenu"><summary class="btn green">📥 Exporter ▾</summary><div class="action-popover">
+        <button onclick="closeMenus();exportExcel()">📊 Planning Excel</button><button onclick="closeMenus();exportPDF()">📄 Planning PDF global</button>
+        <button onclick="closeMenus();openNightHoursExport()">🌙 Heures de nuit</button><button onclick="closeMenus();openAgentDatePdfExport()">👤 PDF agent / période</button>
+        <button onclick="closeMenus();generateServiceOrderPocket()">📑 Pochette BCS complète</button><button onclick="closeMenus();generateIcsAllPlanning()">📆 Calendrier ICS complet</button>
+      </div></details>
+      <details class="action-menu" id="saveMenu"><summary class="btn gray">💾 Sauvegarde ▾</summary><div class="action-popover">
+        <button onclick="closeMenus();exportProgrammingSave()">💾 Enregistrer en .pcprog</button><button onclick="closeMenus();openProgrammingSave()">📂 Charger une programmation</button>
+        <button onclick="closeMenus();loadAutoPlanning()">🕘 Restaurer la sauvegarde automatique</button>
+      </div></details>
       <button class="btn orange" onclick="restoreEmbedded()">↩ Relire l’Excel intégré</button>
       <button class="btn gray" onclick="resetPlanning()">🧹 Réinitialiser</button>
-      <button class="btn green" onclick="exportProgrammingSave()">💾 Sauvegarder programmation</button>
-      <button class="btn gray" onclick="openProgrammingSave()">📂 Ouvrir programmation</button>
+      <button class="btn gray" id="densityToggle" onclick="toggleDensity()">↔️ Affichage compact</button>
       <input type="file" id="programmingSaveInput" accept=".pcprog,application/json" class="hidden" onchange="handleProgrammingSaveFile(event)">
-      <div class="legend"><span class="leg"><i class="dot d-work"></i> Travail</span><span class="leg"><i class="dot d-rest"></i> Repos</span><span class="leg"><i class="dot d-dispo"></i> Dispo</span><span class="leg"><i class="dot" style="background:#a855f7"></i> CP</span><span class="leg"><i class="dot" style="background:#f97316"></i> Astreinte</span><span class="leg"><i class="dot" style="background:#1d4ed8"></i> Badge F1</span><span class="leg"><i class="dot" style="background:#047857"></i> Badge F2</span><span class="leg"><i class="dot d-bad"></i> Forcé / repos &lt;13h</span></div>
     </div>
   </section>
 
@@ -322,7 +400,20 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
       <div><h2>4. Matrice de programmation complète</h2><span class="hint">Clique sur une cellule pour la consulter ou la modifier manuellement (Repos, DISPO, CP, JS, ou forcer)</span></div>
       <div class="fullscreen-actions"><button class="btn fullscreen-btn" id="matrixFullscreenBtn" onclick="toggleMatrixFullscreen()">⛶ Plein écran matrice</button></div>
     </div>
+    <div class="dashboard" id="planningDashboard">
+      <div class="dash-card"><div class="dash-value" id="dashCovered">—</div><div class="dash-label">JS couvertes</div></div>
+      <div class="dash-card"><div class="dash-value" id="dashMissing">—</div><div class="dash-label">À couvrir</div></div>
+      <div class="dash-card"><div class="dash-value" id="dashWarnings">—</div><div class="dash-label">Anomalies</div></div>
+      <div class="dash-card"><div class="dash-value" id="dashUnavailable">—</div><div class="dash-label">Indisponibilités</div></div>
+      <div class="dash-card"><div class="dash-value" id="dashNight">—</div><div class="dash-label">Heures de nuit</div></div>
+    </div>
+    <div class="planning-tools">
+      <div class="field"><label>Rechercher un agent</label><input id="agentSearch" type="search" placeholder="Nom, rôle ou formation…" oninput="applyPlanningFilters()"></div>
+      <div class="field"><label>Afficher</label><select id="agentFilter" onchange="applyPlanningFilters()"><option value="ALL">Tous les agents</option><option value="FORMATEUR">Formateurs</option><option value="F1">Stagiaires F1</option><option value="F2">Stagiaires F2</option><option value="UNAVAILABLE">Absents / démissionnaires</option><option value="ANOMALY">Avec anomalie</option></select></div>
+      <button class="btn gray" onclick="clearPlanningFilters()">Effacer les filtres</button><span class="filter-count" id="filterCount"></span>
+    </div>
     <div class="planning-wrap"><table class="plan"><thead><tr id="planningHead"></tr></thead><tbody id="planningBody"></tbody></table></div>
+    <details class="legend-panel"><summary>Afficher la légende des couleurs</summary><div class="legend"><span class="leg"><i class="dot d-work"></i> Travail</span><span class="leg"><i class="dot d-rest"></i> Repos</span><span class="leg"><i class="dot d-dispo"></i> Dispo</span><span class="leg"><i class="dot" style="background:#a855f7"></i> CP</span><span class="leg"><i class="dot" style="background:#f97316"></i> Astreinte</span><span class="leg"><i class="dot" style="background:#1d4ed8"></i> F1</span><span class="leg"><i class="dot" style="background:#047857"></i> F2</span><span class="leg"><i class="dot d-bad"></i> Anomalie / repos &lt;13h</span><span class="leg"><i class="dot" style="background:#6b7280"></i> Démission</span></div></details>
   </section>
 
   <section class="bottom" id="bottomPanels">
@@ -345,6 +436,7 @@ body.dark .migration-panel{background:linear-gradient(135deg,rgba(69,39,8,.88),r
     <div class="pedagogy-list" id="traineeControlList"><div class="trainee-error ok">En attente de génération.</div></div>
   </section>
 </main>
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Revenir en haut" aria-label="Revenir en haut">↑</button>
 
 <div class="modal-overlay" id="detailModal"><div class="modal"><div class="modal-head"><div><h2 id="modalTitle" style="margin:0"></h2><div class="hint" id="modalSub"></div></div><button class="close" onclick="closeModal()">×</button></div><div id="modalBody"></div></div></div>
 
@@ -593,7 +685,7 @@ function addAgentToCurrentPlanning(def){
   }
 }
 const AUTOSAVE_KEY = "programmation_caen_autosave_v1"; // clé volontairement stable entre les versions HTML
-const APP_VERSION = "06.29-PCPROG";
+const APP_VERSION = "06.32-PCPROG";
 const SAVE_SCHEMA_VERSION = 4;
 const SAVE_MIN_COMPATIBLE_VERSION = 1;
 let autosaveReady = false;
@@ -617,7 +709,62 @@ let saveMigrationReport = null;
 
 function scrollToId(id){document.getElementById(id)?.scrollIntoView({behavior:"smooth",block:"start"});}
 function toggleTheme(){document.body.classList.toggle("dark");}
+function closeMenus(){document.querySelectorAll(".action-menu[open]").forEach(x=>x.removeAttribute("open"));}
+function openMenu(id){
+  closeMenus();
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.setAttribute("open","");
+  const summary=el.querySelector("summary");
+  if(summary){
+    const rect=summary.getBoundingClientRect();
+    if(rect.top<70 || rect.bottom>window.innerHeight-80){
+      summary.scrollIntoView({behavior:"smooth",block:"center"});
+    }
+    summary.focus({preventScroll:true});
+  }
+}
+document.addEventListener("click",e=>{if(!e.target.closest(".action-menu")&&!e.target.closest('[onclick*="openMenu"]'))closeMenus();});
+function toggleDensity(){
+  document.body.classList.toggle("compact");
+  const compact=document.body.classList.contains("compact");
+  try{localStorage.setItem("pcprog-density",compact?"compact":"comfortable");}catch(e){}
+  const btn=document.getElementById("densityToggle");
+  if(btn){btn.classList.toggle("density-active",compact);btn.textContent=compact?"↔️ Affichage confortable":"↔️ Affichage compact";}
+}
+function initErgonomicUi(){
+  try{if(localStorage.getItem("pcprog-density")==="compact")document.body.classList.add("compact");}catch(e){}
+  const btn=document.getElementById("densityToggle");
+  if(btn&&document.body.classList.contains("compact")){btn.classList.add("density-active");btn.textContent="↔️ Affichage confortable";}
+  const top=document.getElementById("backToTop");
+  const updateTop=()=>top?.classList.toggle("show",window.scrollY>500);
+  window.addEventListener("scroll",updateTop,{passive:true});updateTop();
+}
+document.addEventListener("DOMContentLoaded",initErgonomicUi);
 function setState(a,b){document.getElementById("stateInfo").textContent=a;document.getElementById("stateSub").textContent=b||"";}
+function updatePlanningDashboard(){
+  if(!planning)return;
+  let covered=0,missing=0,unavailable=0,night=0;
+  planning.dates.forEach((d,di)=>{if(!isWeekend(d)){const m=getMissingForDate(di).length;missing+=m;const req=(getRequiredForDate?.(di)||[]).length;covered+=Math.max(0,req-m);}});
+  planning.agents.forEach(a=>(a.days||[]).forEach(s=>{if(["ABSENCE","DEMISSION","INACTIF"].includes(s?.type))unavailable++;night+=nightMinutes(s);}));
+  const warnCount=Array.isArray(planning.warnings)?planning.warnings.length:(document.querySelectorAll("#warningsList .item").length||0);
+  const put=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  put("dashCovered",covered);put("dashMissing",missing);put("dashWarnings",warnCount);put("dashUnavailable",unavailable);put("dashNight",durH(night));
+}
+function applyPlanningFilters(){
+  const q=(document.getElementById("agentSearch")?.value||"").trim().toLocaleLowerCase("fr");
+  const f=document.getElementById("agentFilter")?.value||"ALL";
+  const rows=[...document.querySelectorAll("#planningBody tr")];let shown=0;
+  rows.forEach((row,i)=>{const a=planning?.agents?.[i];if(!a)return;const hay=`${a.name} ${a.role||""} ${a.formation||""}`.toLocaleLowerCase("fr");
+    const unavailable=(a.days||[]).some(s=>["ABSENCE","DEMISSION","INACTIF"].includes(s?.type));
+    const anomaly=Boolean((a.forced||[]).length||(a.weeklyWarnings||[]).length);
+    const category=f==="ALL"||(f==="FORMATEUR"&&a.role!=="ELEVE")||(f==="F1"&&a.role==="ELEVE"&&a.formation==="F1")||(f==="F2"&&a.role==="ELEVE"&&a.formation==="F2")||(f==="UNAVAILABLE"&&unavailable)||(f==="ANOMALY"&&anomaly);
+    const visible=category&&(!q||hay.includes(q));row.classList.toggle("filter-hidden",!visible);if(visible)shown++;
+  });
+  const count=document.getElementById("filterCount");if(count)count.textContent=`${shown} agent${shown>1?"s":""} affiché${shown>1?"s":""}`;
+}
+function clearPlanningFilters(){const q=document.getElementById("agentSearch"),f=document.getElementById("agentFilter");if(q)q.value="";if(f)f.value="ALL";applyPlanningFilters();}
+function manageAgentAvailability(ai){const a=planning?.agents?.[ai];if(!a)return;scrollToId("agentManagerCard");setTimeout(()=>{const s=document.getElementById("availabilityAgent");if(s){s.value=a.name;s.focus();}},350);}
 function pad(n){return String(n).padStart(2,"0")}
 function dateKey(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
 function parseDateFR(s){
@@ -2399,13 +2546,15 @@ function renderPlanning(){
       return `<td class="slot"><div class="tile ${cls}" title="${escapeHtml(title)}" onclick="openDetail(${ai},${di})">${formationBadgeHtml(planning.dates[di],s,a)}<div class="code">${code}</div>${serviceTypeHtml(s)}<div class="hours">${h}</div>${ex?`<div class="extra">${ex}</div>`:""}</div></td>`
     }).join("");
     const roleLine=a.role==="ELEVE" ? `🎓 Élève ${a.formation||""} · ${a.workDays} conduite · ⚠️35h ${a.weeklyWarnings?.length||0} · formateurs ${Object.entries(a.trainerCounts||{}).filter(x=>x[1]).map(([k,v])=>`${k}:${v}`).join(' · ')||'—'}` : `📅 ${a.workDays}JS ${a.dispoDays}D ${a.cpDays}CP · 🟧${a.astreinteDays||0}AST · 🎓${a.studentDays||0} élève-jour · ⚠️${a.forced.length}`;
-    const pocketBtn=`<button class="agent-pocket" onclick="event.stopPropagation();generateServiceOrderAgent(${ai})">${a.role==="ELEVE" ? "📑 Journées élève" : "📑 Pochette"}</button><button class="agent-pocket" onclick="event.stopPropagation();generateIcsAgent(${ai})">📆 ICS agent complet</button>`;
+    const pocketBtn=`<div class="agent-actions"><button class="agent-quick" onclick="event.stopPropagation();generateServiceOrderAgent(${ai})">${a.role==="ELEVE" ? "📑 Journées" : "📑 Pochette"}</button><button class="agent-quick" onclick="event.stopPropagation();generateIcsAgent(${ai})">📆 ICS</button><button class="agent-quick" onclick="event.stopPropagation();manageAgentAvailability(${ai})">🗓 Absence</button></div>`;
     const rowClass=a.role==="ELEVE" ? ` class="trainee-row ${String(a.formation||"").toLowerCase()}"` : "";
     const formationPill=a.role==="ELEVE" ? `<span class="trainee-pill ${String(a.formation||"").toLowerCase()}">🎓 ${a.formation||""}</span><span class="trainee-pill ${String(a.formation||"").toLowerCase()}">0 AST</span>` : "";
     const agentNight=(a.days||[]).reduce((sum,s)=>sum+nightMinutes(s),0);
     return `<tr${rowClass}><td class="agent"><div class="agent-name"><span class="avatar">${initials}</span>${a.name}</div><div class="agent-meta">${a.role==="ELEVE"?('Stagiaire '+(a.formation||'')):'Formateur'} ${formationPill} · ⏱ ${durH(a.totalWorkMin)} · 🚆TT ${durH(a.trainHeadMin||0)} · 🌙 Nuit ${durH(agentNight)}<br>${roleLine}<br>🌅${a.familyCounts?.MATIN||0} 🕛${a.familyCounts?.JOURNEE||0} 🌙${a.familyCounts?.SOIR||0}</div>${pocketBtn}</td>${cells}</tr>`;
   }).join("");
   renderBottom();
+  updatePlanningDashboard();
+  applyPlanningFilters();
   saveAutoPlanning();
 }
 function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]))}
@@ -2728,20 +2877,16 @@ async function toggleMatrixFullscreen(){
   const card=document.getElementById('planningCard');
   if(!card) return;
   const entering=!isMatrixFullscreen();
+  // Le plein écran reste géré par CSS : les fenêtres de modification, situées
+  // hors de la matrice dans le DOM, restent ainsi visibles et interactives.
+  if(document.fullscreenElement && document.exitFullscreen){
+    try{ await document.exitFullscreen(); }catch(e){}
+  }
   document.body.classList.toggle('matrix-fullscreen',entering);
   updateMatrixFullscreenButton();
-  try{
-    if(entering && card.requestFullscreen){ await card.requestFullscreen(); }
-    else if(!entering && document.fullscreenElement && document.exitFullscreen){ await document.exitFullscreen(); }
-  }catch(e){
-    // Le mode CSS reste actif si le navigateur bloque le plein écran natif.
-  }
 }
 document.addEventListener('fullscreenchange',()=>{
-  if(!document.fullscreenElement && isMatrixFullscreen()){
-    document.body.classList.remove('matrix-fullscreen');
-    updateMatrixFullscreenButton();
-  }
+  updateMatrixFullscreenButton();
 });
 document.addEventListener('keydown',(e)=>{
   if(e.key==='Escape' && isMatrixFullscreen()){
