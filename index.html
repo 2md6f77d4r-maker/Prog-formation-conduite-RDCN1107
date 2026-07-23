@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — Planning opérationnel</title>
-<!-- Version 06.30 : interface ergonomique, fluide et compatible avec les fonctions V06.29 -->
+<!-- Version 06.33 : journée manuelle SIMU 10h00-14h00 modifiable au second clic -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -209,8 +209,11 @@ body.matrix-fullscreen #planningCard .hint{max-width:680px}
 /* === V06.26 : exports PDF ciblés + journée SIMU === */
 .export-filter{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px;margin:12px 0}
 .export-filter select,.export-filter input{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--solid);color:var(--ink);font-weight:800}
-.simu{background:linear-gradient(145deg,#fef3c7,rgba(251,146,60,.22));color:#9a3412;border:2px dashed #f97316}.simu:after{background:#f97316}
-.manual-action.dual{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manual-action .simu-btn{background:linear-gradient(135deg,#d97706,#f97316)}
+.simu{background:linear-gradient(145deg,#ccfbf1,rgba(45,212,191,.22));color:#0f766e;border:2px dashed #14b8a6}.simu:after{background:#14b8a6}
+body.dark .simu{background:linear-gradient(145deg,#134e4a,rgba(20,184,166,.20));color:#99f6e4;border-color:#2dd4bf}
+.edit-opt.simu-option{border:2px dashed #14b8a6;background:linear-gradient(145deg,rgba(204,251,241,.88),rgba(45,212,191,.16));color:#0f766e}
+body.dark .edit-opt.simu-option{background:rgba(19,78,74,.55);color:#99f6e4;border-color:#2dd4bf}
+.manual-action.dual{display:grid;grid-template-columns:1fr 1fr;gap:8px}.manual-action .simu-btn{background:linear-gradient(135deg,#0f766e,#14b8a6)}
 @media(max-width:680px){.export-filter{grid-template-columns:1fr}.manual-action.dual{grid-template-columns:1fr}}
 
 /* === V06.27 : compatibilité des anciennes sauvegardes .pcprog === */
@@ -308,7 +311,7 @@ body.matrix-fullscreen .back-to-top{display:none}
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.32</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.33</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="openMenu('exportMenu')">📥 Exporter</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -685,7 +688,7 @@ function addAgentToCurrentPlanning(def){
   }
 }
 const AUTOSAVE_KEY = "programmation_caen_autosave_v1"; // clé volontairement stable entre les versions HTML
-const APP_VERSION = "06.32-PCPROG";
+const APP_VERSION = "06.33-PCPROG";
 const SAVE_SCHEMA_VERSION = 4;
 const SAVE_MIN_COMPATIBLE_VERSION = 1;
 let autosaveReady = false;
@@ -2698,6 +2701,7 @@ function recalculateDifferent(){
 function resetPlanning(){clearAutoPlanning();planning=null;saveMigrationReport=null;document.getElementById("saveMigrationPanel")?.classList.add("hidden");programmingSaveLoaded=false;updateGenerationLock();clearPlanningDisplayForSecurity();setState("Prêt à générer","Aucune programmation chargée. Tu peux générer un nouveau planning directement.");}
 function openDetail(ai,di){
   const a=planning.agents[ai], s=a.days[di], d=planning.dates[di];
+  const editingSimu=s?.type==="WORK" && s?.code==="SIMU";
   document.getElementById("modalTitle").textContent=`${a.name} · ${fmt(d)}`;
   document.getElementById("modalSub").textContent=s.type==="REST"?"Repos":s.type==="DISPO"?"Journée DISPO":s.type==="ASTREINTE"?"Astreinte journée":s.type==="CP"?"Congé payé":s.type==="INACTIF"?"Agent hors période de présence":s.type==="ABSENCE"?"Absence":s.type==="DEMISSION"?"Démission":"Journée de service "+s.code;
 
@@ -2713,18 +2717,19 @@ function openDetail(ai,di){
     });
     html+=`</div>`;
   }
-  html+=`<div class="edit-title">➕ Créer une journée manuellement</div>
+  html+=`<div class="edit-title">${editingSimu?"🕹 Modifier les horaires de la journée SIMU":"➕ Créer une journée manuellement"}</div>
   <div class="manual-box">
-    <div><label>Nom / code JS</label><input id="manualCode" placeholder="ex : F999"></div>
-    <div><label>PS</label><input id="manualPS" placeholder="ex : 08:00"></div>
-    <div><label>FS</label><input id="manualFS" placeholder="ex : 16:00"></div>
-    <div><label>Travail effectif</label><input id="manualWork" placeholder="optionnel ex : 7:30"></div>
-    <div><label>Trains</label><input id="manualTrains" placeholder="ex : 852001, 852002"></div>
-    <div class="manual-action dual"><button onclick="createManualJS(${ai},${di})">Créer la JS</button><button class="simu-btn" onclick="createManualJS(${ai},${di},'SIMU')">SIMU</button></div>
+    <div><label>Nom / code JS</label><input id="manualCode" value="${editingSimu?"SIMU":""}" placeholder="ex : F999"${editingSimu?" readonly":""}></div>
+    <div><label>PS</label><input id="manualPS" value="${editingSimu?hhmm(s.startMin):""}" placeholder="ex : 08:00"></div>
+    <div><label>FS</label><input id="manualFS" value="${editingSimu?hhmm(s.endMin):""}" placeholder="ex : 16:00"></div>
+    <div><label>Travail effectif</label><input id="manualWork" value="" placeholder="${editingSimu?`automatique : ${durH(s.workMin||0)}`:"optionnel ex : 7:30"}"></div>
+    <div><label>Trains</label><input id="manualTrains" value="${editingSimu?escapeHtml((s.trains||[]).join(", ")): ""}" placeholder="ex : 852001, 852002"></div>
+    <div class="manual-action${editingSimu?"":" dual"}">${editingSimu?`<button class="simu-btn" onclick="createManualJS(${ai},${di},'SIMU')">Enregistrer les horaires SIMU</button>`:`<button onclick="createManualJS(${ai},${di})">Créer la JS</button><button class="simu-btn" onclick="createDefaultSimu(${ai},${di})">SIMU 10h–14h</button>`}</div>
   </div>
-  <div class="hint" style="margin:-6px 0 14px">La journée créée est ajoutée au besoin du jour. Si tu la retires ensuite, elle apparaîtra automatiquement en journée à couvrir.</div>`;
+  <div class="hint" style="margin:-6px 0 14px">${editingSimu?"Modifie la prise ou la fin de service, puis enregistre. Le travail effectif est recalculé si tu laisses ce champ vide.":"SIMU est créée automatiquement de 10h00 à 14h00. La journée créée est ajoutée au besoin du jour ; si tu la retires ensuite, elle réapparaît en journée à couvrir."}</div>`;
 
   html+=`<div class="edit-grid">`;
+  html+=`<div class="edit-opt simu-option${editingSimu?" selected":""}" onclick="${editingSimu?"document.getElementById('manualPS').focus()":`createDefaultSimu(${ai},${di})`}"><b>🕹 SIMU</b><small>${editingSimu?`${hhmm(s.startMin)}→${hhmm(s.endMin)} · cliquer pour modifier`:"10:00→14:00 · 4h00"}</small></div>`;
   html+=`<div class="edit-opt rest" onclick="setManual(${ai},${di},'REST')"><b>😴 Repos</b><small>Aucun travail</small></div>`;
   html+=`<div class="edit-opt dispo" onclick="setManual(${ai},${di},'DISPO')"><b>DISPO</b><small>10:00→15:00 · 5h00</small></div>`;
   if(a.role!=="ELEVE") html+=`<div class="edit-opt astreinte" onclick="setManual(${ai},${di},'ASTREINTE')"><b>ASTREINTE</b><small>Journée · 8h effectif</small></div>`;
@@ -2759,6 +2764,17 @@ function parseManualDuration(v){
   if(m) return Math.round(parseFloat(m[1])*60);
   return null;
 }
+function createDefaultSimu(ai,di){
+  const ps=document.getElementById("manualPS");
+  const fs=document.getElementById("manualFS");
+  const work=document.getElementById("manualWork");
+  const code=document.getElementById("manualCode");
+  if(code) code.value="SIMU";
+  if(ps) ps.value="10:00";
+  if(fs) fs.value="14:00";
+  if(work) work.value="4:00";
+  createManualJS(ai,di,"SIMU");
+}
 function createManualJS(ai,di,forcedCode=""){
   if(!planning || !planning.agents?.[ai] || !planning.dates?.[di]) return;
   const a=planning.agents[ai];
@@ -2792,6 +2808,7 @@ function createManualJS(ai,di,forcedCode=""){
     isSimu:code==="SIMU"
   };
   const old=a.days[di];
+  const associated=a.role==="ELEVE"?[]:associatedTraineesForTrainerDay(a.name,di);
   a.days[di]=null;
   const ck=canAssign(a,di,js,planning.dates);
   let forced=false, reason="Créée et affectée manuellement";
@@ -2800,13 +2817,15 @@ function createManualJS(ai,di,forcedCode=""){
     forced=true; reason=ck.reason;
   }
   const key=dateKey(d);
-  const exists=(extractedJS||[]).some(j=>j.manualCreated && j.code===code && (j.dates||[]).some(x=>dateKey(x)===key));
-  if(!exists) extractedJS.push(js);
+  const existingIndex=(extractedJS||[]).findIndex(j=>j.manualCreated && j.code===code && (j.dates||[]).some(x=>dateKey(x)===key));
+  if(existingIndex>=0) extractedJS[existingIndex]={...extractedJS[existingIndex],...js};
+  else extractedJS.push(js);
   a.days[di]={...js,type:"WORK",forced,reason,manualTraineeOverride:a.role==="ELEVE",formation:a.role==="ELEVE"?(a.formation||js.formation||""):(js.formation||""),trainerName:a.role==="ELEVE"?"":(js.trainerName||"")};
+  const moved=updateAssociatedTraineesAfterTrainerChange(a,di,associated);
   computeWarnings();
   renderPlanning();
   closeModal();
-  setState("Journée créée",`${code} créée et affectée à ${a.name} le ${fmt(d)}.`);
+  setState(old?.type==="WORK"&&old?.code===code?"Journée modifiée":"Journée créée",`${code} ${old?.type==="WORK"&&old?.code===code?"mise à jour":"créée et affectée"} pour ${a.name} le ${fmt(d)}${moved?` ; ${moved} stagiaire${moved>1?"s":""} associé${moved>1?"s":""} mis à jour`:""}.`);
 }
 
 function setManual(ai,di,type,code){
@@ -2950,7 +2969,7 @@ function exportExcel(){
       if(R>0 && C>2 && C<=planning.dates.length+2){
         const slot=planning.agents[R-1].days[C-3];
         let rgb="DCFCE7";
-        if(slot?.type==="WORK") rgb=slot.forced?"FEE2E2":"DBEAFE";
+        if(slot?.type==="WORK") rgb=slot.forced?"FEE2E2":(slot.code==="SIMU"?"CCFBF1":"DBEAFE");
         else if(slot?.type==="DISPO") rgb="FEF3C7";
         else if(slot?.type==="ASTREINTE") rgb="FFEDD5";
         else if(slot?.type==="CP") rgb="F3E8FF";
@@ -3056,7 +3075,7 @@ function pdfSlotColors(slot){
   if(slot.type==="DISPO") return {fill:[254,243,199],text:[146,64,14]};
   if(slot.type==="ASTREINTE") return {fill:[255,237,213],text:[154,52,18]};
   if(slot.type==="CP") return {fill:[243,232,255],text:[107,33,168]};
-  if(slot.code==="SIMU") return {fill:[255,237,213],text:[154,52,18]};
+  if(slot.code==="SIMU") return {fill:[204,251,241],text:[15,118,110]};
   if(slot.forced || slot.bad) return {fill:[254,226,226],text:[153,27,27]};
   return {fill:[219,234,254],text:[30,58,138]};
 }
@@ -3125,7 +3144,7 @@ function exportPDF(){
       y+=headH;
       for(let ai=pg.ac.start;ai<pg.ac.end;ai++){const a=agents[ai];doc.setFillColor(248,250,252);doc.rect(margin,y,agentW,rowH,"FD");doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.setFontSize(8);doc.text(clean(a.name),margin+2,y+6,{maxWidth:agentW-4});doc.setFont("helvetica","normal");doc.setFontSize(6.3);doc.setTextColor(71,85,105);doc.text(`${a.role==="ELEVE"?"Élève "+(a.formation||""):"Formateur"} · ${durH(a.totalWorkMin)}`,margin+2,y+12);doc.text(`${a.workDays} JS · ${a.dispoDays} D · ${a.astreinteDays||0} AST`,margin+2,y+17);
         for(let di=pg.dc.start;di<pg.dc.end;di++){const slot=a.days?.[di]||{type:"REST",code:"R"},x=margin+agentW+(di-pg.dc.start)*dayW,c=pdfSlotColors(slot),lines=pdfSlotLines(slot);doc.setFillColor(...c.fill);doc.setDrawColor(203,213,225);doc.rect(x,y,dayW,rowH,"FD");doc.setTextColor(...c.text);doc.setFont("helvetica","bold");doc.setFontSize(lines[0].length>7?7.2:9);doc.text(lines[0],x+dayW/2,y+6.5,{align:"center",maxWidth:dayW-2});doc.setFont("helvetica","normal");doc.setFontSize(6.1);doc.text(lines[1],x+dayW/2,y+12,{align:"center",maxWidth:dayW-2});doc.setFont("helvetica","bold");doc.setFontSize(5.4);doc.text(doc.splitTextToSize(lines[2],dayW-3).slice(0,2),x+dayW/2,y+16.5,{align:"center"});}y+=rowH;}
-      doc.setTextColor(71,85,105);doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text("Bleu : travail · vert : repos · jaune : DISPO · orange : SIMU/astreinte · violet : CP · rouge : alerte",margin,pageH-6);
+      doc.setTextColor(71,85,105);doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text("Bleu : travail · vert : repos · jaune : DISPO · turquoise : SIMU · orange : astreinte · violet : CP · rouge : alerte",margin,pageH-6);
     });
     doc.save("planning_caen_complet.pdf");setState("PDF global généré",`${pages.length} page(s) avec pagination des agents et des dates.`);
   }catch(e){console.error(e);alert("Impossible de générer le PDF : "+(e?.message||e));}
