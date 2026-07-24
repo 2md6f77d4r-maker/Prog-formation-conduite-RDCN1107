@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -459,7 +460,7 @@ const TRAINEES = [
   {code:"Morgane S", fullName:"Soulié Morgane", formation:"F1"},
   {code:"Pascal T", fullName:"Thevenet Pascal", formation:"F1"},
   {code:"Gabriel V", fullName:"Vautier Gabriel", formation:"F1"},
-  {code:"Nicolas V", fullName:"Verriele Nicolas", formation:"F1"},
+  {code:"Nicolas V", fullName:"Verriele Nicolas", formation:"F2"},
   {code:"Eugénie B", fullName:"Boyer Eugénie", formation:"F1"},
   {code:"Hugo M", fullName:"Marie Hugo", formation:"F1"},
   {code:"Estelle T", fullName:"Toutain Estelle", formation:"F1"},
@@ -703,7 +704,7 @@ const DEFAULT_ABSENCES = [
   {agent:"Dylan B", start:"2026-08-31", end:"2026-09-11", type:"CP", reason:"CP intégré par défaut : 31/08 au 11/09 inclus"},
   {agent:"Gregorie L", start:"2026-08-17", end:"2026-08-28", type:"CP", reason:"CP intégré par défaut : 17/08 au 28/08 inclus"},
   {agent:"Gaëtan C", start:"2026-08-17", end:"2026-08-21", type:"CP", reason:"CP intégré par défaut : 17/08 au 21/08 inclus"},
-  {agent:"Gaëtan C", start:"2026-10-12", end:"2026-10-16", type:"CP", reason:"CP intégré par défaut : 12/10 au 16/10 inclus"},
+  {agent:"Gaëtan C", start:"2026-10-19", end:"2026-10-23", type:"CP", reason:"CP intégré par défaut : 19/10 au 23/10 inclus"},
   {agent:"Yannick H", start:"2026-08-10", end:"2026-08-14", type:"CP", reason:"CP intégré par défaut : 10/08 au 14/08 inclus"},
   {agent:"Yannick H", start:"2026-09-07", end:"2026-09-18", type:"CP", reason:"CP intégré par défaut : 07/09 au 18/09 inclus"}
 ];
@@ -1870,6 +1871,7 @@ function migrateSaveFile(obj){
     a.role=a.role || (TRAINEES.some(t=>t.code===a.name||t.code===a.code||t.fullName===a.fullName) ? "ELEVE" : "FORMATEUR");
     a.trainerCounts=a.trainerCounts||{}; a.studentDays=Number(a.studentDays||0);
     if(a.role==="ELEVE" && !a.formation){const td=TRAINEES.find(t=>t.code===a.name||t.code===a.code||t.fullName===a.fullName); a.formation=td?.formation||"F1";}
+    if(a.role==="ELEVE" && (a.name==="Nicolas V" || a.code==="Nicolas V" || a.fullName==="Verriele Nicolas")) a.formation="F2";
     a.weeklyWarnings=Array.isArray(a.weeklyWarnings)?a.weeklyWarnings:[];
     a.code=a.code||a.name; a.shortName=a.shortName||a.code; a.fullName=a.fullName||getAgentIdentity(a).fullName; a.matricule=a.matricule||getAgentIdentity(a).matricule||"";
     a.days=Array.isArray(a.days) ? a.days : [];
