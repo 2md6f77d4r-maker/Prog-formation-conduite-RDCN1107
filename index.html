@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — Planning opérationnel</title>
-<!-- Version 06.34 : filtres par dates, exports de la vue filtrée et SIMU hors régime autorisée -->
+<!-- Version 06.35 : recherche multi-agents, filtres par dates, exports filtrés et SIMU hors régime autorisée -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -314,7 +314,7 @@ body.matrix-fullscreen .back-to-top{display:none}
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.34</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.35</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="openMenu('exportMenu')">📥 Exporter</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -414,7 +414,7 @@ body.matrix-fullscreen .back-to-top{display:none}
       <div class="dash-card"><div class="dash-value" id="dashNight">—</div><div class="dash-label">Heures de nuit</div></div>
     </div>
     <div class="planning-tools">
-      <div class="field"><label>Rechercher un agent</label><input id="agentSearch" type="search" placeholder="Nom, rôle ou formation…" oninput="applyPlanningFilters()"></div>
+      <div class="field"><label>Rechercher un ou plusieurs agents</label><input id="agentSearch" type="search" placeholder="Ex. Gaëtan, Dylan, Fabien…" title="Sépare plusieurs recherches par une virgule ou un point-virgule" oninput="applyPlanningFilters()"></div>
       <div class="field"><label>Afficher</label><select id="agentFilter" onchange="applyPlanningFilters()"><option value="ALL">Tous les agents</option><option value="FORMATEUR">Formateurs</option><option value="F1">Stagiaires F1</option><option value="F2">Stagiaires F2</option><option value="UNAVAILABLE">Absents / démissionnaires</option><option value="ANOMALY">Avec anomalie</option></select></div>
       <div class="field date-filter-field"><label>Date de début</label><input id="planningDateStart" type="date" onchange="applyPlanningFilters()"></div>
       <div class="field date-filter-field"><label>Date de fin</label><input id="planningDateEnd" type="date" onchange="applyPlanningFilters()"></div>
@@ -769,13 +769,14 @@ function syncPlanningDateFilters(){
   if(end&&(!end.value||end.value<first||end.value>last))end.value=last;
 }
 function getPlanningFilterState(){
-  const q=(document.getElementById("agentSearch")?.value||"").trim().toLocaleLowerCase("fr");
+  const q=(document.getElementById("agentSearch")?.value||"").trim();
+  const queries=q.split(/[,;\n|]+/).map(x=>x.trim().toLocaleLowerCase("fr")).filter(Boolean);
   const category=document.getElementById("agentFilter")?.value||"ALL";
   const fallbackStart=planning?.dates?.[0]?dateKey(planning.dates[0]):"";
   const fallbackEnd=planning?.dates?.length?dateKey(planning.dates[planning.dates.length-1]):"";
   const start=document.getElementById("planningDateStart")?.value||fallbackStart;
   const end=document.getElementById("planningDateEnd")?.value||fallbackEnd;
-  return {q,category,start,end};
+  return {q,queries,category,start,end};
 }
 function agentMatchesPlanningFilter(agent,state,dateIndices){
   const hay=`${agent.name} ${agent.role||""} ${agent.formation||""}`.toLocaleLowerCase("fr");
@@ -783,10 +784,13 @@ function agentMatchesPlanningFilter(agent,state,dateIndices){
   const slotAnomaly=dateIndices.some(di=>Boolean(agent.days?.[di]?.forced||agent.days?.[di]?.bad));
   const anomaly=slotAnomaly||Boolean((agent.weeklyWarnings||[]).length);
   const category=state.category==="ALL"||(state.category==="FORMATEUR"&&agent.role!=="ELEVE")||(state.category==="F1"&&agent.role==="ELEVE"&&agent.formation==="F1")||(state.category==="F2"&&agent.role==="ELEVE"&&agent.formation==="F2")||(state.category==="UNAVAILABLE"&&unavailable)||(state.category==="ANOMALY"&&anomaly);
-  return category&&(!state.q||hay.includes(state.q));
+  // Plusieurs termes séparés par une virgule ou un point-virgule fonctionnent
+  // comme une sélection multiple : l'agent est affiché s'il correspond à l'un d'eux.
+  const searchMatch=!state.queries?.length||state.queries.some(term=>hay.includes(term));
+  return category&&searchMatch;
 }
 function getFilteredPlanningView(){
-  if(!planning)return {state:{q:"",category:"ALL",start:"",end:""},dateIndices:[],agentEntries:[]};
+  if(!planning)return {state:{q:"",queries:[],category:"ALL",start:"",end:""},dateIndices:[],agentEntries:[]};
   const state=getPlanningFilterState();
   const validRange=!state.start||!state.end||state.start<=state.end;
   const dateIndices=(planning.dates||[]).map((d,i)=>({i,k:dateKey(d)})).filter(x=>validRange&&x.k>=state.start&&x.k<=state.end).map(x=>x.i);
