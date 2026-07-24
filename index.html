@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Programmation Caen — Planning opérationnel</title>
-<!-- Version 06.33 : journée manuelle SIMU 10h00-14h00 modifiable au second clic -->
+<!-- Version 06.34 : filtres par dates, exports de la vue filtrée et SIMU hors régime autorisée -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -295,6 +295,9 @@ body.compact .agent-meta{font-size:10px}
 .legend-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(66,184,156,.055)}.legend-panel summary{cursor:pointer;font-size:12px;font-weight:900;color:var(--muted)}.legend-panel .legend{margin-top:9px;padding-top:9px}
 body.dark .dash-card .dash-value{color:#8be0cc}
 tr.filter-hidden{display:none}
+.date-filter-hidden{display:none!important}
+.planning-tools .date-filter-field{min-width:155px}
+.planning-tools .filtered-export-btn{white-space:nowrap}
 
 /* === V06.32 : menus visibles + modification des JS en plein écran === */
 .modal-overlay{z-index:2000}
@@ -311,7 +314,7 @@ body.matrix-fullscreen .back-to-top{display:none}
 <body>
 <header>
   <div class="header-inner">
-    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.33</p></div></div>
+    <div class="brand"><div class="brand-icon">🚆</div><div><h1>PROGRAMMATION CAEN</h1><p>Planning des formateurs · Référentiel JS ADC Phase 4 · V06.34</p></div></div>
     <div class="nav">
       <button class="active">📅 Planning</button><button onclick="scrollToId('bottomPanels')">⚠️ Anomalies</button><button onclick="openMenu('exportMenu')">📥 Exporter</button><button onclick="openHelp()">❔ Aide</button>
       <button class="theme" onclick="toggleTheme()">🌙</button>
@@ -413,6 +416,9 @@ body.matrix-fullscreen .back-to-top{display:none}
     <div class="planning-tools">
       <div class="field"><label>Rechercher un agent</label><input id="agentSearch" type="search" placeholder="Nom, rôle ou formation…" oninput="applyPlanningFilters()"></div>
       <div class="field"><label>Afficher</label><select id="agentFilter" onchange="applyPlanningFilters()"><option value="ALL">Tous les agents</option><option value="FORMATEUR">Formateurs</option><option value="F1">Stagiaires F1</option><option value="F2">Stagiaires F2</option><option value="UNAVAILABLE">Absents / démissionnaires</option><option value="ANOMALY">Avec anomalie</option></select></div>
+      <div class="field date-filter-field"><label>Date de début</label><input id="planningDateStart" type="date" onchange="applyPlanningFilters()"></div>
+      <div class="field date-filter-field"><label>Date de fin</label><input id="planningDateEnd" type="date" onchange="applyPlanningFilters()"></div>
+      <button class="btn green filtered-export-btn" onclick="openFilteredViewExport()">📥 Exporter la vue filtrée</button>
       <button class="btn gray" onclick="clearPlanningFilters()">Effacer les filtres</button><span class="filter-count" id="filterCount"></span>
     </div>
     <div class="planning-wrap"><table class="plan"><thead><tr id="planningHead"></tr></thead><tbody id="planningBody"></tbody></table></div>
@@ -754,19 +760,58 @@ function updatePlanningDashboard(){
   const put=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   put("dashCovered",covered);put("dashMissing",missing);put("dashWarnings",warnCount);put("dashUnavailable",unavailable);put("dashNight",durH(night));
 }
-function applyPlanningFilters(){
-  const q=(document.getElementById("agentSearch")?.value||"").trim().toLocaleLowerCase("fr");
-  const f=document.getElementById("agentFilter")?.value||"ALL";
-  const rows=[...document.querySelectorAll("#planningBody tr")];let shown=0;
-  rows.forEach((row,i)=>{const a=planning?.agents?.[i];if(!a)return;const hay=`${a.name} ${a.role||""} ${a.formation||""}`.toLocaleLowerCase("fr");
-    const unavailable=(a.days||[]).some(s=>["ABSENCE","DEMISSION","INACTIF"].includes(s?.type));
-    const anomaly=Boolean((a.forced||[]).length||(a.weeklyWarnings||[]).length);
-    const category=f==="ALL"||(f==="FORMATEUR"&&a.role!=="ELEVE")||(f==="F1"&&a.role==="ELEVE"&&a.formation==="F1")||(f==="F2"&&a.role==="ELEVE"&&a.formation==="F2")||(f==="UNAVAILABLE"&&unavailable)||(f==="ANOMALY"&&anomaly);
-    const visible=category&&(!q||hay.includes(q));row.classList.toggle("filter-hidden",!visible);if(visible)shown++;
-  });
-  const count=document.getElementById("filterCount");if(count)count.textContent=`${shown} agent${shown>1?"s":""} affiché${shown>1?"s":""}`;
+function syncPlanningDateFilters(){
+  if(!planning?.dates?.length)return;
+  const first=dateKey(planning.dates[0]),last=dateKey(planning.dates[planning.dates.length-1]);
+  const start=document.getElementById("planningDateStart"),end=document.getElementById("planningDateEnd");
+  [start,end].forEach(el=>{if(el){el.min=first;el.max=last;}});
+  if(start&&(!start.value||start.value<first||start.value>last))start.value=first;
+  if(end&&(!end.value||end.value<first||end.value>last))end.value=last;
 }
-function clearPlanningFilters(){const q=document.getElementById("agentSearch"),f=document.getElementById("agentFilter");if(q)q.value="";if(f)f.value="ALL";applyPlanningFilters();}
+function getPlanningFilterState(){
+  const q=(document.getElementById("agentSearch")?.value||"").trim().toLocaleLowerCase("fr");
+  const category=document.getElementById("agentFilter")?.value||"ALL";
+  const fallbackStart=planning?.dates?.[0]?dateKey(planning.dates[0]):"";
+  const fallbackEnd=planning?.dates?.length?dateKey(planning.dates[planning.dates.length-1]):"";
+  const start=document.getElementById("planningDateStart")?.value||fallbackStart;
+  const end=document.getElementById("planningDateEnd")?.value||fallbackEnd;
+  return {q,category,start,end};
+}
+function agentMatchesPlanningFilter(agent,state,dateIndices){
+  const hay=`${agent.name} ${agent.role||""} ${agent.formation||""}`.toLocaleLowerCase("fr");
+  const unavailable=dateIndices.some(di=>["ABSENCE","DEMISSION","INACTIF"].includes(agent.days?.[di]?.type));
+  const slotAnomaly=dateIndices.some(di=>Boolean(agent.days?.[di]?.forced||agent.days?.[di]?.bad));
+  const anomaly=slotAnomaly||Boolean((agent.weeklyWarnings||[]).length);
+  const category=state.category==="ALL"||(state.category==="FORMATEUR"&&agent.role!=="ELEVE")||(state.category==="F1"&&agent.role==="ELEVE"&&agent.formation==="F1")||(state.category==="F2"&&agent.role==="ELEVE"&&agent.formation==="F2")||(state.category==="UNAVAILABLE"&&unavailable)||(state.category==="ANOMALY"&&anomaly);
+  return category&&(!state.q||hay.includes(state.q));
+}
+function getFilteredPlanningView(){
+  if(!planning)return {state:{q:"",category:"ALL",start:"",end:""},dateIndices:[],agentEntries:[]};
+  const state=getPlanningFilterState();
+  const validRange=!state.start||!state.end||state.start<=state.end;
+  const dateIndices=(planning.dates||[]).map((d,i)=>({i,k:dateKey(d)})).filter(x=>validRange&&x.k>=state.start&&x.k<=state.end).map(x=>x.i);
+  const agentEntries=(planning.agents||[]).map((agent,index)=>({agent,index})).filter(x=>agentMatchesPlanningFilter(x.agent,state,dateIndices));
+  return {state,dateIndices,agentEntries};
+}
+function applyPlanningFilters(){
+  if(!planning)return;
+  syncPlanningDateFilters();
+  const view=getFilteredPlanningView(),visibleAgents=new Set(view.agentEntries.map(x=>x.index)),visibleDates=new Set(view.dateIndices);
+  [...document.querySelectorAll("#planningBody tr")].forEach((row,i)=>row.classList.toggle("filter-hidden",!visibleAgents.has(i)));
+  [...document.querySelectorAll("#planningHead th")].forEach((cell,columnIndex)=>cell.classList.toggle("date-filter-hidden",columnIndex>0&&!visibleDates.has(columnIndex-1)));
+  [...document.querySelectorAll("#planningBody tr")].forEach(row=>[...row.children].forEach((cell,columnIndex)=>cell.classList.toggle("date-filter-hidden",columnIndex>0&&!visibleDates.has(columnIndex-1))));
+  const count=document.getElementById("filterCount");
+  if(count){
+    const invalid=view.state.start&&view.state.end&&view.state.start>view.state.end;
+    count.textContent=invalid?"Période invalide":`${view.agentEntries.length} agent${view.agentEntries.length>1?"s":""} · ${view.dateIndices.length} jour${view.dateIndices.length>1?"s":""}`;
+  }
+}
+function clearPlanningFilters(){
+  const q=document.getElementById("agentSearch"),f=document.getElementById("agentFilter"),start=document.getElementById("planningDateStart"),end=document.getElementById("planningDateEnd");
+  if(q)q.value="";if(f)f.value="ALL";
+  if(planning?.dates?.length){if(start)start.value=dateKey(planning.dates[0]);if(end)end.value=dateKey(planning.dates[planning.dates.length-1]);}
+  applyPlanningFilters();
+}
 function manageAgentAvailability(ai){const a=planning?.agents?.[ai];if(!a)return;scrollToId("agentManagerCard");setTimeout(()=>{const s=document.getElementById("availabilityAgent");if(s){s.value=a.name;s.focus();}},350);}
 function pad(n){return String(n).padStart(2,"0")}
 function dateKey(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
@@ -2015,6 +2060,13 @@ function reconcileSavedPlanningWithCurrentCatalog(sourceName="ancienne sauvegard
     (agent.days||[]).forEach((slot,di)=>{
       if(!slot || slot.type!=="WORK") return;
       report.totalWork++;
+      // SIMU est une journée pédagogique créée manuellement : elle n'existe pas
+      // dans le régime Excel et ne doit jamais être signalée comme supprimée ou hors régime.
+      if(String(slot.code||"").toUpperCase()==="SIMU"){
+        slot.migrationIssue=false;
+        report.unchanged++;
+        return;
+      }
       const date=planning.dates[di];
       const validToday=currentServicesForDate(date);
       const exact=validToday.find(js=>js.code===slot.code);
@@ -2251,6 +2303,9 @@ function getRequiredForDate(di){
 }
 function isServicePlannedOnDate(svc, di){
   if(!svc || !planning || !planning.dates || !planning.dates[di]) return false;
+  // La journée SIMU est volontairement hors référentiel : sa validité repose sur
+  // sa création manuelle, pas sur le régime de circulation Excel.
+  if(String(svc.code||"").toUpperCase()==="SIMU") return true;
   const k=dateKey(planning.dates[di]);
   // Toujours contrôler contre le référentiel actuellement intégré.
   // Une ancienne sauvegarde .pcprog contient ses anciennes dates : elles ne doivent
@@ -2557,6 +2612,7 @@ function renderPlanning(){
   }).join("");
   renderBottom();
   updatePlanningDashboard();
+  syncPlanningDateFilters();
   applyPlanningFilters();
   saveAutoPlanning();
 }
@@ -2737,7 +2793,7 @@ function openDetail(ai,di){
   codesAvailable.forEach(c=>{
     html+=`<div class="edit-opt work${s.code===c&&s.type==="WORK"?" selected":""}" onclick="setManual(${ai},${di},'WORK','${c.replace(/'/g,"\'")}')"><b>${escapeHtml(c)}</b><small>Affecter cette JS</small></div>`;
   });
-  html+=`</div><div class="hint" style="margin-bottom:14px">Si tu mets une journée en repos, CP ou DISPO, la JS supprimée repasse automatiquement en <b>journée non couverte</b> et le compteur du jour devient rouge/orange. Elle sera proposée en haut de cette fenêtre dans “Journées à couvrir ce jour”. Si la règle des 13h de repos n'est pas respectée, une confirmation te sera demandée pour forcer. Si tu affectes une JS sur une date où elle n'est pas prévue au régime Excel, elle passera en erreur rouge.</div>`;
+  html+=`</div><div class="hint" style="margin-bottom:14px">Si tu mets une journée en repos, CP ou DISPO, la JS supprimée repasse automatiquement en <b>journée non couverte</b> et le compteur du jour devient rouge/orange. Elle sera proposée en haut de cette fenêtre dans “Journées à couvrir ce jour”. Si la règle des 13h de repos n'est pas respectée, une confirmation te sera demandée pour forcer. Si tu affectes une JS sur une date où elle n'est pas prévue au régime Excel, elle passera en erreur rouge. La journée SIMU est autorisée hors régime et ne déclenche pas cette erreur.</div>`;
 
   html+=`<div class="detail-grid">
     <div class="detail-box"><span>Type</span>${s.type==="WORK"?"Travail":s.type==="DISPO"?"DISPO":s.type==="ASTREINTE"?"Astreinte":s.type==="CP"?"Congé payé":s.type==="ABSENCE"?"Absence":s.type==="DEMISSION"?"Démission":s.type==="INACTIF"?"Inactif":"Repos"}</div>
@@ -2851,7 +2907,7 @@ function setManual(ai,di,type,code){
     const k=dateKey(planning.dates[di]);
     const js=(extractedJS||[]).find(j=>j.code===code && (j.dates||[]).some(d=>dateKey(d)===k)) || (extractedJS||[]).find(j=>j.code===code);
     if(!js){alert("JS introuvable.");return}
-    const offRegime=!(js.dates||[]).some(d=>dateKey(d)===k);
+    const offRegime=String(js.code||"").toUpperCase()!=="SIMU"&&!(js.dates||[]).some(d=>dateKey(d)===k);
     a.days[di]=null;
     const ck=canAssign(a,di,js,planning.dates);
     let forced=false, reason="Affecté manuellement";
@@ -2918,7 +2974,7 @@ function closeModal(){document.getElementById("detailModal").classList.remove("o
 function openHelp(){
   document.getElementById("modalTitle").textContent="Aide";
   document.getElementById("modalSub").textContent="Fonctionnement du générateur";
-  document.getElementById("modalBody").innerHTML=`<div class="item">Le fichier Excel intégré est lu automatiquement. Le tableau des journées extraites est volontairement masqué.</div><div class="item">Les samedis et dimanches sont placés en repos pour tous. Les JS présentes ces jours-là sont listées en bas comme non couvertes volontairement.</div><div class="item">Dès qu’une JS est attribuée sur une date, au moins un formateur est en ASTREINTE ; les élèves ne reçoivent jamais d’astreinte.</div><div class="item">Les 19 élèves intégrés sont séparés en Formation 1 et Formation 2. Selon les périodes F1/F2, seuls les élèves du groupe concerné sont affectés sur les journées de conduite des formateurs, avec maximum 3 élèves par formateur, aucune astreinte, contrôle 35h/semaine et recherche d’équité.</div><div class="item">L’auto-save navigateur est actif : la programmation est conservée dans ce navigateur même si tu remplaces le fichier HTML par une nouvelle version. Le bouton Réinitialiser supprime cette sauvegarde.</div><div class="item">Les CP intégrés par défaut bloquent directement les agents dans la matrice. L’astreinte manuelle compte comme une journée de 8h00 de travail effectif.</div><div class="item bad-i">Si une JS ne peut pas respecter les 13h de repos, elle peut être attribuée en moindre mal et la cellule devient rouge avec explication au survol. Une JS affectée sur une date non prévue par son régime Excel passe aussi en erreur rouge.</div>`;
+  document.getElementById("modalBody").innerHTML=`<div class="item">Le fichier Excel intégré est lu automatiquement. Le tableau des journées extraites est volontairement masqué.</div><div class="item">Les samedis et dimanches sont placés en repos pour tous. Les JS présentes ces jours-là sont listées en bas comme non couvertes volontairement.</div><div class="item">Dès qu’une JS est attribuée sur une date, au moins un formateur est en ASTREINTE ; les élèves ne reçoivent jamais d’astreinte.</div><div class="item">Les 19 élèves intégrés sont séparés en Formation 1 et Formation 2. Selon les périodes F1/F2, seuls les élèves du groupe concerné sont affectés sur les journées de conduite des formateurs, avec maximum 3 élèves par formateur, aucune astreinte, contrôle 35h/semaine et recherche d’équité.</div><div class="item">L’auto-save navigateur est actif : la programmation est conservée dans ce navigateur même si tu remplaces le fichier HTML par une nouvelle version. Le bouton Réinitialiser supprime cette sauvegarde.</div><div class="item">Les CP intégrés par défaut bloquent directement les agents dans la matrice. L’astreinte manuelle compte comme une journée de 8h00 de travail effectif.</div><div class="item">La journée manuelle SIMU est autorisée hors régime Excel et ne déclenche pas d’anomalie « journée non prévue ».</div><div class="item bad-i">Si une JS ne peut pas respecter les 13h de repos, elle peut être attribuée en moindre mal et la cellule devient rouge avec explication au survol. Une autre JS affectée sur une date non prévue par son régime Excel passe aussi en erreur rouge.</div>`;
   document.getElementById("detailModal").classList.add("open");
 }
 
@@ -3006,6 +3062,107 @@ function exportExcel(){
 
   XLSX.writeFile(wb,"planning_caen_js_excel.xlsx");
   setState("Excel généré","Export Excel amélioré avec couleurs, cellules détaillées et récapitulatif.");
+}
+
+function filteredSlotText(slot){
+  if(!slot||slot.type==="REST")return "R";
+  if(slot.type==="DISPO")return "DISPO\n10:00-15:00\n5h00";
+  if(slot.type==="ASTREINTE")return "ASTREINTE\n08:00-16:00\n8h00";
+  if(slot.type==="CP")return "CP";
+  if(slot.type==="ABSENCE")return "ABSENCE";
+  if(slot.type==="DEMISSION")return "DÉMISSION";
+  if(slot.type==="INACTIF")return "INACTIF";
+  return `${slot.code||"JS"}\n${hhmm(slot.startMin)}-${hhmm(slot.endMin)}\n${durH(slot.workMin||0)} · TT ${durH(trainHeadMinutes(slot))} · Nuit ${durH(nightMinutes(slot))}${slot.forced?"\n⚠ "+(slot.reason||""):""}`;
+}
+function filteredSlotFill(slot){
+  if(slot?.type==="WORK")return slot.forced||slot.bad?"FEE2E2":(slot.code==="SIMU"?"CCFBF1":"DBEAFE");
+  if(slot?.type==="DISPO")return "FEF3C7";
+  if(slot?.type==="ASTREINTE")return "FFEDD5";
+  if(slot?.type==="CP")return "F3E8FF";
+  if(slot?.type==="ABSENCE")return "FEE2E2";
+  if(slot?.type==="DEMISSION"||slot?.type==="INACTIF")return "D1D5DB";
+  return "DCFCE7";
+}
+function filteredAgentStats(agent,dateIndices){
+  const slots=dateIndices.map(di=>agent.days?.[di]).filter(Boolean);
+  return {
+    workMin:slots.reduce((sum,s)=>sum+(isWorking(s)?Number(s.workMin||0):0),0),
+    trainMin:slots.reduce((sum,s)=>sum+(s?.type==="WORK"?trainHeadMinutes(s):0),0),
+    nightMin:slots.reduce((sum,s)=>sum+nightMinutes(s),0),
+    workDays:slots.filter(s=>s?.type==="WORK").length,
+    dispo:slots.filter(s=>s?.type==="DISPO").length,
+    ast:slots.filter(s=>s?.type==="ASTREINTE").length,
+    cp:slots.filter(s=>s?.type==="CP").length,
+    anomalies:slots.filter(s=>s?.forced||s?.bad).length
+  };
+}
+function openFilteredViewExport(){
+  if(!hasUnlockedProgrammingData()){alert("Génère ou ouvre d’abord une programmation avant d’exporter.");return;}
+  applyPlanningFilters();
+  const view=getFilteredPlanningView();
+  if(!view.dateIndices.length){alert("Aucune date ne correspond aux filtres.");return;}
+  if(!view.agentEntries.length){alert("Aucun agent ne correspond aux filtres.");return;}
+  const categoryLabels={ALL:"Tous les agents",FORMATEUR:"Formateurs",F1:"Stagiaires F1",F2:"Stagiaires F2",UNAVAILABLE:"Absents / démissionnaires",ANOMALY:"Avec anomalie"};
+  document.getElementById("modalTitle").textContent="Exporter la vue filtrée";
+  document.getElementById("modalSub").textContent="L’export reprend exactement les agents et les dates actuellement visibles";
+  document.getElementById("modalBody").innerHTML=`
+    <div class="item">${view.agentEntries.length} agent${view.agentEntries.length>1?"s":""} · ${view.dateIndices.length} jour${view.dateIndices.length>1?"s":""}<br>${escapeHtml(view.state.start)} au ${escapeHtml(view.state.end)} · ${escapeHtml(categoryLabels[view.state.category]||view.state.category)}${view.state.q?` · recherche « ${escapeHtml(view.state.q)} »`:""}</div>
+    <div class="manual-action dual">
+      <button class="btn green" onclick="exportFilteredPlanningExcel()">📊 Exporter en Excel</button>
+      <button class="btn red" onclick="exportFilteredPlanningPDF()">📄 Exporter en PDF</button>
+    </div>`;
+  document.getElementById("detailModal").classList.add("open");
+}
+function exportFilteredPlanningExcel(){
+  const view=getFilteredPlanningView();
+  if(!view.dateIndices.length||!view.agentEntries.length){alert("La vue filtrée est vide.");return;}
+  const wb=XLSX.utils.book_new();
+  const headers=["Agent","Rôle","Formation",...view.dateIndices.map(di=>`J${di+1} ${fmt(planning.dates[di])} (${getDayCoverage(di).label})`),"Total heures","Tête de train","Heures de nuit","JS / conduite","DISPO","AST","CP","Anomalies"];
+  const rows=[headers,...view.agentEntries.map(({agent})=>{const s=filteredAgentStats(agent,view.dateIndices);return [agent.name,agent.role==="ELEVE"?"Élève":"Formateur",agent.formation||"",...view.dateIndices.map(di=>filteredSlotText(agent.days?.[di])),durH(s.workMin),durH(s.trainMin),durH(s.nightMin),s.workDays,s.dispo,s.ast,s.cp,s.anomalies];})];
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws["!freeze"]={xSplit:1,ySplit:1};
+  ws["!cols"]=[{wch:24},{wch:12},{wch:10},...view.dateIndices.map(()=>({wch:18})),{wch:13},{wch:14},{wch:14},{wch:12},{wch:8},{wch:8},{wch:8},{wch:11}];
+  ws["!rows"]=rows.map((_,i)=>({hpt:i===0?34:52}));
+  const range=XLSX.utils.decode_range(ws["!ref"]);
+  for(let R=range.s.r;R<=range.e.r;R++)for(let C=range.s.c;C<=range.e.c;C++){
+    const addr=XLSX.utils.encode_cell({r:R,c:C});if(!ws[addr])continue;
+    ws[addr].s={alignment:{vertical:"center",horizontal:C===0?"left":"center",wrapText:true},border:{top:{style:"thin",color:{rgb:"CBD5E1"}},bottom:{style:"thin",color:{rgb:"CBD5E1"}},left:{style:"thin",color:{rgb:"CBD5E1"}},right:{style:"thin",color:{rgb:"CBD5E1"}}}};
+    if(R===0)ws[addr].s={...ws[addr].s,font:{bold:true,color:{rgb:"FFFFFF"}},fill:excelFill("237C68")};
+    if(R>0&&C>2&&C<=view.dateIndices.length+2){const slot=view.agentEntries[R-1].agent.days?.[view.dateIndices[C-3]];ws[addr].s={...ws[addr].s,fill:excelFill(filteredSlotFill(slot)),font:{bold:slot?.type==="WORK"||slot?.type==="ASTREINTE",color:{rgb:"0F172A"}}};}
+  }
+  XLSX.utils.book_append_sheet(wb,ws,"Vue filtrée");
+  const details=[["Agent","Rôle","Formation","Date","JS","PS","FS","Travail","Tête de train","Heures de nuit","Formateur associé"]];
+  view.agentEntries.forEach(({agent})=>view.dateIndices.forEach(di=>{const s=agent.days?.[di];if(s?.type==="WORK")details.push([agent.name,agent.role==="ELEVE"?"Élève":"Formateur",agent.formation||"",fmtShort(planning.dates[di]),s.code||"",hhmm(s.startMin),hhmm(s.endMin),durH(s.workMin||0),durH(trainHeadMinutes(s)),durH(nightMinutes(s)),s.trainerName||""]);}));
+  const ws2=XLSX.utils.aoa_to_sheet(details);ws2["!cols"]=[{wch:24},{wch:12},{wch:10},{wch:12},{wch:10},{wch:8},{wch:8},{wch:12},{wch:14},{wch:14},{wch:24}];
+  XLSX.utils.book_append_sheet(wb,ws2,"Détail conduite");
+  XLSX.writeFile(wb,`planning_filtre_${view.state.start}_${view.state.end}.xlsx`);
+  closeModal();setState("Vue filtrée exportée",`${view.agentEntries.length} agent(s) · ${view.dateIndices.length} jour(s) · Excel`);
+}
+function exportFilteredPlanningPDF(){
+  if(!window.jspdf?.jsPDF){alert("Le module PDF n'est pas chargé.");return;}
+  const view=getFilteredPlanningView();
+  if(!view.dateIndices.length||!view.agentEntries.length){alert("La vue filtrée est vide.");return;}
+  try{
+    const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4",compress:true});
+    const margin=7,pageW=297,pageH=210,agentW=43,topY=27,headH=18,rowH=21,maxDayCols=8,maxAgentRows=7;
+    const dayChunks=[];for(let i=0;i<view.dateIndices.length;i+=maxDayCols)dayChunks.push(view.dateIndices.slice(i,i+maxDayCols));
+    const agentChunks=[];for(let i=0;i<view.agentEntries.length;i+=maxAgentRows)agentChunks.push(view.agentEntries.slice(i,i+maxAgentRows));
+    const pages=[];dayChunks.forEach(days=>agentChunks.forEach(agents=>pages.push({days,agents})));
+    pages.forEach((page,pi)=>{
+      if(pi)doc.addPage("a4","landscape");
+      doc.setFillColor(255,255,255);doc.rect(0,0,pageW,pageH,"F");doc.setDrawColor(35,124,104);doc.setLineWidth(.45);doc.roundedRect(margin,6,pageW-margin*2,15,2,2,"D");
+      doc.setTextColor(35,124,104);doc.setFont("helvetica","bold");doc.setFontSize(13);doc.text("Programmation Caen — vue filtrée",margin+4,15);
+      doc.setFont("helvetica","normal");doc.setFontSize(8);doc.text(`${fmtShort(planning.dates[view.dateIndices[0]])} au ${fmtShort(planning.dates[view.dateIndices[view.dateIndices.length-1]])} · page ${pi+1}/${pages.length}`,pageW-margin-4,12,{align:"right"});doc.text(`${view.agentEntries.length} agent(s) · ${view.dateIndices.length} jour(s)`,pageW-margin-4,17,{align:"right"});
+      const dayW=(pageW-margin*2-agentW)/page.days.length;let y=topY;
+      doc.setDrawColor(203,213,225);doc.setFillColor(226,232,240);doc.rect(margin,y,agentW,headH,"FD");doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.setFontSize(9);doc.text("AGENT",margin+2,y+10);
+      page.days.forEach((di,j)=>{const x=margin+agentW+j*dayW,c=getDayCoverage(di);doc.setFillColor(c.total===0?241:(c.covered<c.total?254:220),c.total===0?245:(c.covered<c.total?226:252),c.total===0?249:(c.covered<c.total?226:231));doc.rect(x,y,dayW,headH,"FD");doc.setTextColor(15,23,42);doc.setFontSize(8);doc.text(`J${di+1}`,x+dayW/2,y+5,{align:"center"});doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text(fmtShort(planning.dates[di]),x+dayW/2,y+10,{align:"center"});doc.setFont("helvetica","bold");doc.text(c.label,x+dayW/2,y+15,{align:"center"});});
+      y+=headH;
+      page.agents.forEach(({agent})=>{const stats=filteredAgentStats(agent,view.dateIndices);doc.setFillColor(248,250,252);doc.rect(margin,y,agentW,rowH,"FD");doc.setTextColor(15,23,42);doc.setFont("helvetica","bold");doc.setFontSize(8);doc.text(String(agent.name||""),margin+2,y+6,{maxWidth:agentW-4});doc.setFont("helvetica","normal");doc.setFontSize(6.3);doc.setTextColor(71,85,105);doc.text(agent.role==="ELEVE"?`Élève ${agent.formation||""}`:"Formateur",margin+2,y+12);doc.text(`${durH(stats.workMin)} · ${stats.workDays} JS · Nuit ${durH(stats.nightMin)}`,margin+2,y+17,{maxWidth:agentW-4});
+        page.days.forEach((di,j)=>{const slot=agent.days?.[di]||{type:"REST",code:"R"},x=margin+agentW+j*dayW,c=pdfSlotColors(slot),lines=pdfSlotLines(slot);doc.setFillColor(...c.fill);doc.setDrawColor(203,213,225);doc.rect(x,y,dayW,rowH,"FD");doc.setTextColor(...c.text);doc.setFont("helvetica","bold");doc.setFontSize(lines[0].length>7?7.2:9);doc.text(lines[0],x+dayW/2,y+6.5,{align:"center",maxWidth:dayW-2});doc.setFont("helvetica","normal");doc.setFontSize(6.1);doc.text(lines[1],x+dayW/2,y+12,{align:"center",maxWidth:dayW-2});doc.setFont("helvetica","bold");doc.setFontSize(5.4);doc.text(doc.splitTextToSize(lines[2],dayW-3).slice(0,2),x+dayW/2,y+16.5,{align:"center"});});y+=rowH;});
+      doc.setTextColor(71,85,105);doc.setFont("helvetica","normal");doc.setFontSize(7);doc.text("Export généré à partir des filtres actifs de la matrice.",margin,pageH-6);
+    });
+    doc.save(`planning_filtre_${view.state.start}_${view.state.end}.pdf`);closeModal();setState("Vue filtrée exportée",`${view.agentEntries.length} agent(s) · ${view.dateIndices.length} jour(s) · PDF`);
+  }catch(e){console.error(e);alert("Impossible de générer le PDF filtré : "+(e?.message||e));}
 }
 
 function openNightHoursExport(){
